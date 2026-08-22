@@ -1,9 +1,10 @@
 import os
 import secrets
 import sqlite3
-import smtplib
+import json
+from urllib import error as urlerror
+from urllib import request as urlrequest
 from datetime import datetime, timedelta, timezone
-from email.message import EmailMessage
 from functools import wraps
 from pathlib import Path
 
@@ -94,22 +95,35 @@ def init_database():
     db.commit()
 
 def send_email(recipient, subject, body):
-    sender = os.environ.get("EMAIL", "").strip()
-    app_password = os.environ.get("APP_PASSWORD", "").replace(" ", "")
-    if not sender or not app_password:
-        app.logger.warning("Email was not sent: EMAIL or APP_PASSWORD is not configured.")
+    """Send transactional email with Resend's HTTPS API.
+
+    HTTPS works from Render where direct Gmail SMTP connections may be blocked.
+    """
+    api_key = os.environ.get("RESEND_API_KEY", "").strip()
+    sender = os.environ.get("EMAIL_FROM", "").strip()
+    if not api_key or not sender:
+        app.logger.warning("Email was not sent: RESEND_API_KEY or EMAIL_FROM is not configured.")
         return False
-    message = EmailMessage()
-    message["From"] = f"StudySpace <{sender}>"
-    message["To"] = recipient
-    message["Subject"] = subject
-    message.set_content(body)
+    payload = json.dumps({
+        "from": f"StudySpace <{sender}>",
+        "to": [recipient],
+        "subject": subject,
+        "text": body,
+    }).encode("utf-8")
+    api_request = urlrequest.Request(
+        "https://api.resend.com/emails",
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
     try:
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=15) as smtp:
-            smtp.login(sender, app_password)
-            smtp.send_message(message)
+        with urlrequest.urlopen(api_request, timeout=15):
+            pass
         return True
-    except (OSError, smtplib.SMTPException) as error:
+    except (OSError, urlerror.URLError, urlerror.HTTPError) as error:
         app.logger.error("Email delivery failed: %s", error)
         return False
 
@@ -168,11 +182,17 @@ def forgot_password():
         if user:
             code = f"{secrets.randbelow(9000) + 1000:04d}"
             expires_at = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
-            db = get_db()
-            db.execute("INSERT INTO password_reset_otps (email,code_hash,expires_at) VALUES (?,?,?) ON CONFLICT(email) DO UPDATE SET code_hash=excluded.code_hash, expires_at=excluded.expires_at", (email, generate_password_hash(code), expires_at))
-            db.commit()
-            send_email(email, "Your StudySpace password reset code", f"Your password reset OTP is: {code}\n\nIt expires in 10 minutes. Do not share this code with anyone.\n\nRegards,\nStudySpace")
-        flash("If that email has an account, a 4-digit OTP has been sent.", "success")
+            delivered = send_email(email, "Your StudySpace password reset code", f"Your password reset OTP is: {code}\n\nIt expires in 10 minutes. Do not share this code with anyone.\n\nRegards,\nStudySpace")
+            if delivered:
+                db = get_db()
+                db.execute("INSERT INTO password_reset_otps (email,code_hash,expires_at) VALUES (?,?,?) ON CONFLICT(email) DO UPDATE SET code_hash=excluded.code_hash, expires_at=excluded.expires_at", (email, generate_password_hash(code), expires_at))
+                db.commit()
+                flash("A 4-digit OTP has been sent. Check your inbox and spam folder.", "success")
+            else:
+                flash("We could not send the OTP. Please try again later.", "error")
+                return redirect(url_for("forgot_password"))
+        else:
+            flash("If that email has an account, a 4-digit OTP has been sent.", "success")
         return redirect(url_for("reset_password", email=email))
     return render_template("forgot_password.html")
 
