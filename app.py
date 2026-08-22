@@ -1,11 +1,17 @@
 import os
+import secrets
 import sqlite3
+import smtplib
+from datetime import datetime, timedelta, timezone
+from email.message import EmailMessage
 from functools import wraps
 from pathlib import Path
 
 from flask import Flask, flash, g, redirect, render_template, request, session, url_for
+from dotenv import load_dotenv
 from werkzeug.security import check_password_hash, generate_password_hash
 
+load_dotenv()
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "change-this-secret-key-before-deploying")
 DATA_DIR = Path(os.environ.get("DATA_DIR", Path(app.root_path) / "data"))
@@ -29,6 +35,7 @@ def init_database():
     db.executescript("""
     CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, password TEXT NOT NULL, is_admin INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE IF NOT EXISTS materials (id INTEGER PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL, category TEXT NOT NULL, drive_url TEXT NOT NULL, icon TEXT NOT NULL DEFAULT '📚');
+    CREATE TABLE IF NOT EXISTS password_reset_otps (email TEXT PRIMARY KEY, code_hash TEXT NOT NULL, expires_at TEXT NOT NULL);
     """)
     email = os.environ.get("ADMIN_EMAIL", "admin@example.com").strip().lower()
     password = os.environ.get("ADMIN_PASSWORD", "ChangeMe123!")
@@ -41,6 +48,26 @@ def init_database():
           ("Assignments & Projects", "Guides and submission resources.", "Resources", DEFAULT_DRIVE_URL, "📁"),
           ("Video Lectures", "Recorded classes and learning videos.", "Videos", DEFAULT_DRIVE_URL, "🎥")])
     db.commit()
+
+def send_email(recipient, subject, body):
+    sender = os.environ.get("EMAIL", "").strip()
+    app_password = os.environ.get("APP_PASSWORD", "").replace(" ", "")
+    if not sender or not app_password:
+        app.logger.warning("Email was not sent: EMAIL or APP_PASSWORD is not configured.")
+        return False
+    message = EmailMessage()
+    message["From"] = f"StudySpace <{sender}>"
+    message["To"] = recipient
+    message["Subject"] = subject
+    message.set_content(body)
+    try:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=15) as smtp:
+            smtp.login(sender, app_password)
+            smtp.send_message(message)
+        return True
+    except (OSError, smtplib.SMTPException) as error:
+        app.logger.error("Email delivery failed: %s", error)
+        return False
 
 def login_required(view):
     @wraps(view)
@@ -72,7 +99,8 @@ def register():
         else:
             try:
                 db = get_db(); db.execute("INSERT INTO users (name,email,password) VALUES (?,?,?)", (name, email, generate_password_hash(password))); db.commit()
-                flash("Registration successful. Please log in.", "success"); return redirect(url_for("login"))
+                greeting_sent = send_email(email, "Welcome to StudySpace", f"Hi {name},\n\nWelcome to StudySpace! Your account is ready. You can now log in and access study materials.\n\nRegards,\nStudySpace")
+                flash("Registration successful. A welcome email has been sent." if greeting_sent else "Registration successful. Please log in.", "success"); return redirect(url_for("login"))
             except sqlite3.IntegrityError: flash("An account with this email already exists.", "error")
     return render_template("auth.html", mode="register")
 
@@ -86,6 +114,43 @@ def login():
             return redirect(url_for("admin_dashboard") if user["is_admin"] else url_for("home"))
         flash("Incorrect email or password.", "error")
     return render_template("auth.html", mode="login")
+
+@app.route("/forgot-password", methods=["GET", "POST"])
+def forgot_password():
+    if request.method == "POST":
+        email = request.form.get("email", "").strip().lower()
+        user = get_db().execute("SELECT id FROM users WHERE email=?", (email,)).fetchone()
+        if user:
+            code = f"{secrets.randbelow(9000) + 1000:04d}"
+            expires_at = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
+            db = get_db()
+            db.execute("INSERT INTO password_reset_otps (email,code_hash,expires_at) VALUES (?,?,?) ON CONFLICT(email) DO UPDATE SET code_hash=excluded.code_hash, expires_at=excluded.expires_at", (email, generate_password_hash(code), expires_at))
+            db.commit()
+            send_email(email, "Your StudySpace password reset code", f"Your password reset OTP is: {code}\n\nIt expires in 10 minutes. Do not share this code with anyone.\n\nRegards,\nStudySpace")
+        flash("If that email has an account, a 4-digit OTP has been sent.", "success")
+        return redirect(url_for("reset_password", email=email))
+    return render_template("forgot_password.html")
+
+@app.route("/reset-password", methods=["GET", "POST"])
+def reset_password():
+    email = request.values.get("email", "").strip().lower()
+    if request.method == "POST":
+        otp = request.form.get("otp", "").strip()
+        password = request.form.get("password", "")
+        entry = get_db().execute("SELECT * FROM password_reset_otps WHERE email=?", (email,)).fetchone()
+        valid = entry and datetime.fromisoformat(entry["expires_at"]) > datetime.now(timezone.utc) and check_password_hash(entry["code_hash"], otp)
+        if not valid:
+            flash("The OTP is invalid or has expired. Request a new one.", "error")
+        elif len(password) < 8:
+            flash("Use a password of at least 8 characters.", "error")
+        else:
+            db = get_db()
+            db.execute("UPDATE users SET password=? WHERE email=?", (generate_password_hash(password), email))
+            db.execute("DELETE FROM password_reset_otps WHERE email=?", (email,))
+            db.commit()
+            flash("Password updated. You can now log in.", "success")
+            return redirect(url_for("login"))
+    return render_template("reset_password.html", email=email)
 
 @app.route("/logout")
 def logout():
