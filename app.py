@@ -78,8 +78,8 @@ def init_database():
         CREATE TABLE IF NOT EXISTS materials (id INTEGER PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL, category TEXT NOT NULL, drive_url TEXT NOT NULL, icon TEXT NOT NULL DEFAULT '📚');
         CREATE TABLE IF NOT EXISTS password_reset_otps (email TEXT PRIMARY KEY, code_hash TEXT NOT NULL, expires_at TEXT NOT NULL);
         """)
-    email = os.environ.get("ADMIN_EMAIL", "admin@example.com").strip().lower()
-    password = os.environ.get("ADMIN_PASSWORD", "ChangeMe123!")
+    email = os.environ.get("ADMIN_EMAIL", "sanetsingh9186@gmail.com").strip().lower()
+    password = os.environ.get("ADMIN_PASSWORD", "@Sanket918616")
     if not db.execute("SELECT id FROM users WHERE email=?", (email,)).fetchone():
         db.execute("INSERT INTO users (name,email,password,is_admin) VALUES (?,?,?,?)", ("Administrator", email, generate_password_hash(password), True))
     if not db.execute("SELECT id FROM materials").fetchone():
