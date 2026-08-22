@@ -36,6 +36,9 @@ class DatabaseConnection:
     def executemany(self, query, params):
         if self.postgres:
             query = query.replace("?", "%s")
+            cursor = self.connection.cursor()
+            cursor.executemany(query, params)
+            return cursor
         return self.connection.executemany(query, params)
 
     def executescript(self, script):
