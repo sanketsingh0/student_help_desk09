@@ -9,6 +9,9 @@ from pathlib import Path
 
 from flask import Flask, flash, g, redirect, render_template, request, session, url_for
 from dotenv import load_dotenv
+from psycopg import errors as psycopg_errors
+from psycopg.rows import dict_row
+import psycopg
 from werkzeug.security import check_password_hash, generate_password_hash
 
 load_dotenv()
@@ -16,13 +19,43 @@ app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "change-this-secret-key-before-deploying")
 DATA_DIR = Path(os.environ.get("DATA_DIR", Path(app.root_path) / "data"))
 DATABASE = DATA_DIR / "studyspace.db"
+DATABASE_URL = os.environ.get("DATABASE_URL")
 DEFAULT_DRIVE_URL = os.environ.get("DRIVE_FOLDER_URL", "https://drive.google.com/")
+
+class DatabaseConnection:
+    """Small compatibility layer for SQLite locally and PostgreSQL on Render."""
+    def __init__(self, connection, postgres=False):
+        self.connection = connection
+        self.postgres = postgres
+
+    def execute(self, query, params=None):
+        if self.postgres:
+            query = query.replace("?", "%s")
+        return self.connection.execute(query, params or ())
+
+    def executemany(self, query, params):
+        if self.postgres:
+            query = query.replace("?", "%s")
+        return self.connection.executemany(query, params)
+
+    def executescript(self, script):
+        return self.connection.executescript(script)
+
+    def commit(self):
+        self.connection.commit()
+
+    def close(self):
+        self.connection.close()
 
 def get_db():
     if "db" not in g:
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        g.db = sqlite3.connect(DATABASE)
-        g.db.row_factory = sqlite3.Row
+        if DATABASE_URL:
+            g.db = DatabaseConnection(psycopg.connect(DATABASE_URL, row_factory=dict_row), postgres=True)
+        else:
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+            connection = sqlite3.connect(DATABASE)
+            connection.row_factory = sqlite3.Row
+            g.db = DatabaseConnection(connection)
     return g.db
 
 @app.teardown_appcontext
@@ -32,11 +65,16 @@ def close_db(_error):
 
 def init_database():
     db = get_db()
-    db.executescript("""
-    CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, password TEXT NOT NULL, is_admin INTEGER NOT NULL DEFAULT 0);
-    CREATE TABLE IF NOT EXISTS materials (id INTEGER PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL, category TEXT NOT NULL, drive_url TEXT NOT NULL, icon TEXT NOT NULL DEFAULT '📚');
-    CREATE TABLE IF NOT EXISTS password_reset_otps (email TEXT PRIMARY KEY, code_hash TEXT NOT NULL, expires_at TEXT NOT NULL);
-    """)
+    if DATABASE_URL:
+        db.execute("CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, password TEXT NOT NULL, is_admin BOOLEAN NOT NULL DEFAULT FALSE)")
+        db.execute("CREATE TABLE IF NOT EXISTS materials (id SERIAL PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL, category TEXT NOT NULL, drive_url TEXT NOT NULL, icon TEXT NOT NULL DEFAULT '📚')")
+        db.execute("CREATE TABLE IF NOT EXISTS password_reset_otps (email TEXT PRIMARY KEY, code_hash TEXT NOT NULL, expires_at TEXT NOT NULL)")
+    else:
+        db.executescript("""
+        CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, password TEXT NOT NULL, is_admin INTEGER NOT NULL DEFAULT 0);
+        CREATE TABLE IF NOT EXISTS materials (id INTEGER PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL, category TEXT NOT NULL, drive_url TEXT NOT NULL, icon TEXT NOT NULL DEFAULT '📚');
+        CREATE TABLE IF NOT EXISTS password_reset_otps (email TEXT PRIMARY KEY, code_hash TEXT NOT NULL, expires_at TEXT NOT NULL);
+        """)
     email = os.environ.get("ADMIN_EMAIL", "admin@example.com").strip().lower()
     password = os.environ.get("ADMIN_PASSWORD", "ChangeMe123!")
     if not db.execute("SELECT id FROM users WHERE email=?", (email,)).fetchone():
@@ -101,7 +139,8 @@ def register():
                 db = get_db(); db.execute("INSERT INTO users (name,email,password) VALUES (?,?,?)", (name, email, generate_password_hash(password))); db.commit()
                 greeting_sent = send_email(email, "Welcome to StudySpace", f"Hi {name},\n\nWelcome to StudySpace! Your account is ready. You can now log in and access study materials.\n\nRegards,\nStudySpace")
                 flash("Registration successful. A welcome email has been sent." if greeting_sent else "Registration successful. Please log in.", "success"); return redirect(url_for("login"))
-            except sqlite3.IntegrityError: flash("An account with this email already exists.", "error")
+            except (sqlite3.IntegrityError, psycopg_errors.UniqueViolation):
+                flash("An account with this email already exists.", "error")
     return render_template("auth.html", mode="register")
 
 @app.route("/login", methods=["GET", "POST"])
