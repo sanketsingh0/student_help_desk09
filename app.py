@@ -78,7 +78,7 @@ def init_database():
     email = os.environ.get("ADMIN_EMAIL", "admin@example.com").strip().lower()
     password = os.environ.get("ADMIN_PASSWORD", "ChangeMe123!")
     if not db.execute("SELECT id FROM users WHERE email=?", (email,)).fetchone():
-        db.execute("INSERT INTO users (name,email,password,is_admin) VALUES (?,?,?,1)", ("Administrator", email, generate_password_hash(password)))
+        db.execute("INSERT INTO users (name,email,password,is_admin) VALUES (?,?,?,?)", ("Administrator", email, generate_password_hash(password), True))
     if not db.execute("SELECT id FROM materials").fetchone():
         db.executemany("INSERT INTO materials (title,description,category,drive_url,icon) VALUES (?,?,?,?,?)", [
           ("Class Notes", "Chapter-wise notes and explanations.", "Notes", DEFAULT_DRIVE_URL, "📝"),
