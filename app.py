@@ -175,6 +175,33 @@ def login():
         flash("Incorrect email or password.", "error")
     return render_template("auth.html", mode="login")
 
+@app.route("/debug-env")
+def debug_env():
+    """Debug endpoint to check email configuration on the server."""
+    api_key = os.environ.get("RESEND_API_KEY", "")
+    sender = os.environ.get("EMAIL_FROM", "")
+    result = {
+        "resend_api_key_configured": bool(api_key),
+        "resend_api_key_preview": f"{api_key[:10]}..." if len(api_key) > 10 else "NOT SET",
+        "email_from": sender,
+        "email_from_configured": bool(sender),
+    }
+    # Test the API key against Resend
+    if api_key:
+        try:
+            test_resp = requests.get(
+                "https://api.resend.com/domains",
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=10,
+            )
+            result["api_test"] = {
+                "status_code": test_resp.status_code,
+                "response": test_resp.text[:500],
+            }
+        except requests.RequestException as e:
+            result["api_test"] = {"error": str(e)}
+    return result
+
 @app.route("/forgot-password", methods=["GET", "POST"])
 def forgot_password():
     if request.method == "POST":
