@@ -92,21 +92,58 @@ def init_database():
     db.commit()
 
 def send_email(recipient, subject, body):
-    """Send via Resend's HTTP API when RESEND_API_KEY is set (preferred on Render,
-    since outbound Gmail SMTP from datacenter IPs is often throttled/blocked).
-    If Resend delivery fails (e.g. unverified sender domain on the free tier),
-    fall back to Gmail SMTP."""
+    """Send via an HTTP email API when available (preferred on Render, since
+    outbound SMTP is blocked on Render's free tier):
+      1. Resend  – requires a verified domain to send to arbitrary recipients
+      2. Brevo   – free tier allows 300 email/day, no domain verification needed
+      3. Gmail SMTP – works locally, but blocked on Render free instances
+    Tries each configured provider in order until one succeeds."""
     resend_key = os.environ.get("RESEND_API_KEY", "").strip()
     if resend_key:
         sent = _send_via_resend(resend_key, recipient, subject, body)
         if sent:
             return True
         app.logger.warning(
-            "Resend delivery failed; falling back to Gmail SMTP. "
-            "For reliable email delivery verify a domain at https://resend.com/domains "
-            "and set EMAIL_FROM to an address using that domain."
+            "Resend delivery failed; trying Brevo. For direct Resend delivery, "
+            "verify a domain at https://resend.com/domains and set EMAIL_FROM "
+            "to an address using that domain."
         )
+    brevo_key = os.environ.get("BREVO_API_KEY", "").strip()
+    if brevo_key:
+        sent = _send_via_brevo(brevo_key, recipient, subject, body)
+        if sent:
+            return True
+        app.logger.warning("Brevo delivery failed; falling back to Gmail SMTP.")
     return _send_via_smtp(recipient, subject, body)
+
+def _send_via_brevo(api_key, recipient, subject, body):
+    """Send via Brevo's transactional email HTTP API. The sender address is
+    configured with SENDER_EMAIL (a real inbox that has been verified in the
+    Brevo dashboard – no custom domain required on the free plan)."""
+    sender = os.environ.get("SENDER_EMAIL", "").strip()
+    sender_name = os.environ.get("SENDER_NAME", "StudySpace").strip()
+    if not sender:
+        app.logger.warning("Brevo delivery skipped: SENDER_EMAIL is not configured.")
+        return False
+    try:
+        response = requests.post(
+            "https://api.brevo.com/v3/smtp/email",
+            headers={"api-key": api_key, "Content-Type": "application/json", "Accept": "application/json"},
+            json={
+                "sender": {"name": sender_name, "email": sender},
+                "to": [{"email": recipient}],
+                "subject": subject,
+                "textContent": body,
+            },
+            timeout=15,
+        )
+        if response.status_code >= 400:
+            app.logger.error("Brevo delivery failed: %s %s", response.status_code, response.text)
+            return False
+        return True
+    except requests.RequestException as error:
+        app.logger.error("Brevo delivery failed: %s", error)
+        return False
 
 def _send_via_resend(api_key, recipient, subject, body):
     from_address = os.environ.get("EMAIL_FROM", "").strip() or "StudySpace <onboarding@resend.dev>"
