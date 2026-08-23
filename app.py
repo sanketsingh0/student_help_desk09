@@ -118,9 +118,9 @@ def send_email(recipient, subject, body):
 
 def _send_via_brevo(api_key, recipient, subject, body):
     """Send via Brevo's transactional email HTTP API. The sender address is
-    configured with SENDER_EMAIL (a real inbox that has been verified in the
-    Brevo dashboard – no custom domain required on the free plan)."""
-    sender = os.environ.get("SENDER_EMAIL", "").strip()
+    SENDER_EMAIL (defaults to the verified sender sanketsingh9186@gmail.com –
+    no custom domain required on the free plan)."""
+    sender = os.environ.get("SENDER_EMAIL", "sanketsingh9186@gmail.com").strip().lower()
     sender_name = os.environ.get("SENDER_NAME", "StudySpace").strip()
     if not sender:
         app.logger.warning("Brevo delivery skipped: SENDER_EMAIL is not configured.")
