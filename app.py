@@ -1,11 +1,13 @@
 import os
 import secrets
 import sqlite3
+import smtplib
 from datetime import datetime, timedelta, timezone
-import requests
+from email.message import EmailMessage
 from functools import wraps
 from pathlib import Path
 
+import requests
 from flask import Flask, flash, g, redirect, render_template, request, session, url_for
 from dotenv import load_dotenv
 from psycopg import errors as psycopg_errors
@@ -77,13 +79,10 @@ def init_database():
         CREATE TABLE IF NOT EXISTS materials (id INTEGER PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL, category TEXT NOT NULL, drive_url TEXT NOT NULL, icon TEXT NOT NULL DEFAULT '📚');
         CREATE TABLE IF NOT EXISTS password_reset_otps (email TEXT PRIMARY KEY, code_hash TEXT NOT NULL, expires_at TEXT NOT NULL);
         """)
-    email = os.environ.get("ADMIN_EMAIL", "sanketsingh9186@gmail.com").strip().lower()
+    email = os.environ.get("ADMIN_EMAIL", "sanetsingh9186@gmail.com").strip().lower()
     password = os.environ.get("ADMIN_PASSWORD", "@Sanket918616")
-    admin = db.execute("SELECT id FROM users WHERE email=?", (email,)).fetchone()
-    if not admin:
+    if not db.execute("SELECT id FROM users WHERE email=?", (email,)).fetchone():
         db.execute("INSERT INTO users (name,email,password,is_admin) VALUES (?,?,?,?)", ("Administrator", email, generate_password_hash(password), True))
-    else:
-        db.execute("UPDATE users SET password=?, is_admin=? WHERE email=?", (generate_password_hash(password), True, email))
     if not db.execute("SELECT id FROM materials").fetchone():
         db.executemany("INSERT INTO materials (title,description,category,drive_url,icon) VALUES (?,?,?,?,?)", [
           ("Class Notes", "Chapter-wise notes and explanations.", "Notes", DEFAULT_DRIVE_URL, "📝"),
@@ -93,39 +92,49 @@ def init_database():
     db.commit()
 
 def send_email(recipient, subject, body):
-    """Send transactional email with Resend's HTTPS API.
+    """Send via Resend's HTTP API when RESEND_API_KEY is set (preferred on Render,
+    since outbound Gmail SMTP from datacenter IPs is often throttled/blocked).
+    Falls back to Gmail SMTP if Resend isn't configured."""
+    resend_key = os.environ.get("RESEND_API_KEY", "").strip()
+    if resend_key:
+        return _send_via_resend(resend_key, recipient, subject, body)
+    return _send_via_smtp(recipient, subject, body)
 
-    HTTPS works from Render where direct Gmail SMTP connections may be blocked.
-    The requests library is used instead of urllib because Cloudflare in front
-    of Resend's API blocks Python's urllib TLS fingerprint (HTTP 403, error 1010).
-    """
-    api_key = os.environ.get("RESEND_API_KEY", "").strip()
-    sender = os.environ.get("EMAIL_FROM", "").strip()
-    if not api_key or not sender:
-        app.logger.warning("Email was not sent: RESEND_API_KEY or EMAIL_FROM is not configured.")
-        return False
+def _send_via_resend(api_key, recipient, subject, body):
+    from_address = os.environ.get("EMAIL_FROM", "").strip() or "StudySpace <onboarding@resend.dev>"
     try:
         response = requests.post(
             "https://api.resend.com/emails",
-            json={
-                "from": f"StudySpace <{sender}>",
-                "to": [recipient],
-                "subject": subject,
-                "text": body,
-            },
-            headers={"Authorization": f"Bearer {api_key}"},
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={"from": from_address, "to": [recipient], "subject": subject, "text": body},
             timeout=15,
         )
         if response.status_code >= 400:
-            app.logger.error(
-                "Email delivery failed: HTTP Error %s: %s",
-                response.status_code,
-                response.text,
-            )
+            app.logger.error("Resend delivery failed: %s %s", response.status_code, response.text)
             return False
         return True
     except requests.RequestException as error:
-        app.logger.error("Email delivery failed: %s", error)
+        app.logger.error("Resend delivery failed: %s", error)
+        return False
+
+def _send_via_smtp(recipient, subject, body):
+    sender = os.environ.get("EMAIL", "").strip()
+    app_password = os.environ.get("APP_PASSWORD", "").replace(" ", "")
+    if not sender or not app_password:
+        app.logger.warning("Email was not sent: no RESEND_API_KEY, and EMAIL/APP_PASSWORD is not configured.")
+        return False
+    message = EmailMessage()
+    message["From"] = f"StudySpace <{sender}>"
+    message["To"] = recipient
+    message["Subject"] = subject
+    message.set_content(body)
+    try:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=15) as smtp:
+            smtp.login(sender, app_password)
+            smtp.send_message(message)
+        return True
+    except (OSError, smtplib.SMTPException) as error:
+        app.logger.error("SMTP delivery failed: %s", error)
         return False
 
 def login_required(view):
@@ -175,33 +184,6 @@ def login():
         flash("Incorrect email or password.", "error")
     return render_template("auth.html", mode="login")
 
-@app.route("/debug-env")
-def debug_env():
-    """Debug endpoint to check email configuration on the server."""
-    api_key = os.environ.get("RESEND_API_KEY", "")
-    sender = os.environ.get("EMAIL_FROM", "")
-    result = {
-        "resend_api_key_configured": bool(api_key),
-        "resend_api_key_preview": f"{api_key[:10]}..." if len(api_key) > 10 else "NOT SET",
-        "email_from": sender,
-        "email_from_configured": bool(sender),
-    }
-    # Test the API key against Resend
-    if api_key:
-        try:
-            test_resp = requests.get(
-                "https://api.resend.com/domains",
-                headers={"Authorization": f"Bearer {api_key}"},
-                timeout=10,
-            )
-            result["api_test"] = {
-                "status_code": test_resp.status_code,
-                "response": test_resp.text[:500],
-            }
-        except requests.RequestException as e:
-            result["api_test"] = {"error": str(e)}
-    return result
-
 @app.route("/forgot-password", methods=["GET", "POST"])
 def forgot_password():
     if request.method == "POST":
@@ -210,17 +192,11 @@ def forgot_password():
         if user:
             code = f"{secrets.randbelow(9000) + 1000:04d}"
             expires_at = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
-            delivered = send_email(email, "Your StudySpace password reset code", f"Your password reset OTP is: {code}\n\nIt expires in 10 minutes. Do not share this code with anyone.\n\nRegards,\nStudySpace")
-            if delivered:
-                db = get_db()
-                db.execute("INSERT INTO password_reset_otps (email,code_hash,expires_at) VALUES (?,?,?) ON CONFLICT(email) DO UPDATE SET code_hash=excluded.code_hash, expires_at=excluded.expires_at", (email, generate_password_hash(code), expires_at))
-                db.commit()
-                flash("A 4-digit OTP has been sent. Check your inbox and spam folder.", "success")
-            else:
-                flash("We could not send the OTP. Please try again later.", "error")
-                return redirect(url_for("forgot_password"))
-        else:
-            flash("If that email has an account, a 4-digit OTP has been sent.", "success")
+            db = get_db()
+            db.execute("INSERT INTO password_reset_otps (email,code_hash,expires_at) VALUES (?,?,?) ON CONFLICT(email) DO UPDATE SET code_hash=excluded.code_hash, expires_at=excluded.expires_at", (email, generate_password_hash(code), expires_at))
+            db.commit()
+            send_email(email, "Your StudySpace password reset code", f"Your password reset OTP is: {code}\n\nIt expires in 10 minutes. Do not share this code with anyone.\n\nRegards,\nStudySpace")
+        flash("If that email has an account, a 4-digit OTP has been sent.", "success")
         return redirect(url_for("reset_password", email=email))
     return render_template("forgot_password.html")
 

@@ -13,7 +13,13 @@ services:
         sync: false
       - key: ADMIN_PASSWORD
         sync: false
+      - key: EMAIL
+        sync: false
+      - key: APP_PASSWORD
+        sync: false
       - key: RESEND_API_KEY
         sync: false
       - key: EMAIL_FROM
+        sync: false
+      - key: DATABASE_URL
         sync: false
