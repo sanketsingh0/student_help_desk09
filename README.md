@@ -29,7 +29,7 @@ python app.py
 
 Open `http://127.0.0.1:5000`.
 
-## Sending email (password reset / welcome)
+## Sending welcome email
 
 The app tries these providers in order until one succeeds:
 
@@ -38,12 +38,18 @@ The app tries these providers in order until one succeeds:
    - **Important:** If you get a `401 unrecognised IP address` error from Brevo, allowlist your server IP at [app.brevo.com/security/authorised_ips](https://app.brevo.com/security/authorised_ips) (on Render free tier, set it to **No restriction** since the outbound IP can change).
 3. **Gmail SMTP** – set `EMAIL` and `APP_PASSWORD` (a Gmail app password). Works locally, but note Render's free tier **blocks outbound SMTP**, so this fallback generally only works when running locally.
 
+## Managing user passwords
+
+- There is **no self-service password reset** (no OTP flow).
+- The **administrator** can change any user's password from the **Admin panel** under **Manage user passwords**.
+- The admin enters a new password (minimum 8 characters) for the selected user and clicks **Change password**.
+
 ## Deploy on Render
 
 1. Upload this project to a GitHub repository.
 2. In Render, select **New +** → **Blueprint** and connect the repository. Render detects `render.yaml`.
 3. Enter `DRIVE_FOLDER_URL`, `ADMIN_EMAIL`, and `ADMIN_PASSWORD` when asked. Render generates `SECRET_KEY` automatically.
-4. For password-reset/welcome emails, add `BREVO_API_KEY` and `SENDER_EMAIL` (create a free Brevo account, verify a sender inbox, and paste your [API key](https://app.brevo.com/settings/keys/api)).
+4. For welcome emails, add `BREVO_API_KEY` and `SENDER_EMAIL` (create a free Brevo account, verify a sender inbox, and paste your [API key](https://app.brevo.com/settings/keys/api)).
 5. Allowlist the Render server IP in Brevo under [Authorised IPs](https://app.brevo.com/security/authorised_ips) (choose **No restriction** if your IP can change).
 6. Click **Apply**. Render builds and deploys the website.
 
