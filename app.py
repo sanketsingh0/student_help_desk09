@@ -94,10 +94,18 @@ def init_database():
 def send_email(recipient, subject, body):
     """Send via Resend's HTTP API when RESEND_API_KEY is set (preferred on Render,
     since outbound Gmail SMTP from datacenter IPs is often throttled/blocked).
-    Falls back to Gmail SMTP if Resend isn't configured."""
+    If Resend delivery fails (e.g. unverified sender domain on the free tier),
+    fall back to Gmail SMTP."""
     resend_key = os.environ.get("RESEND_API_KEY", "").strip()
     if resend_key:
-        return _send_via_resend(resend_key, recipient, subject, body)
+        sent = _send_via_resend(resend_key, recipient, subject, body)
+        if sent:
+            return True
+        app.logger.warning(
+            "Resend delivery failed; falling back to Gmail SMTP. "
+            "For reliable email delivery verify a domain at https://resend.com/domains "
+            "and set EMAIL_FROM to an address using that domain."
+        )
     return _send_via_smtp(recipient, subject, body)
 
 def _send_via_resend(api_key, recipient, subject, body):
