@@ -1,8 +1,6 @@
 import os
-import secrets
 import sqlite3
 import smtplib
-from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from functools import wraps
 from pathlib import Path
@@ -22,6 +20,11 @@ DATA_DIR = Path(os.environ.get("DATA_DIR", Path(app.root_path) / "data"))
 DATABASE = DATA_DIR / "studyspace.db"
 DATABASE_URL = os.environ.get("DATABASE_URL")
 DEFAULT_DRIVE_URL = os.environ.get("DRIVE_FOLDER_URL", "https://drive.google.com/")
+ADMIN_CONTACT_EMAIL = os.environ.get("ADMIN_EMAIL", "sanketsingh9186@gmail.com").strip().lower()
+
+@app.context_processor
+def inject_admin_contact():
+    return {"admin_contact_email": ADMIN_CONTACT_EMAIL}
 
 class DatabaseConnection:
     """Small compatibility layer for SQLite locally and PostgreSQL on Render."""
@@ -72,14 +75,12 @@ def init_database():
     if DATABASE_URL:
         db.execute("CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, password TEXT NOT NULL, is_admin BOOLEAN NOT NULL DEFAULT FALSE)")
         db.execute("CREATE TABLE IF NOT EXISTS materials (id SERIAL PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL, category TEXT NOT NULL, drive_url TEXT NOT NULL, icon TEXT NOT NULL DEFAULT '📚')")
-        db.execute("CREATE TABLE IF NOT EXISTS password_reset_otps (email TEXT PRIMARY KEY, code_hash TEXT NOT NULL, expires_at TEXT NOT NULL)")
     else:
         db.executescript("""
         CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, password TEXT NOT NULL, is_admin INTEGER NOT NULL DEFAULT 0);
         CREATE TABLE IF NOT EXISTS materials (id INTEGER PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL, category TEXT NOT NULL, drive_url TEXT NOT NULL, icon TEXT NOT NULL DEFAULT '📚');
-        CREATE TABLE IF NOT EXISTS password_reset_otps (email TEXT PRIMARY KEY, code_hash TEXT NOT NULL, expires_at TEXT NOT NULL);
         """)
-    email = os.environ.get("ADMIN_EMAIL", "sanetsingh9186@gmail.com").strip().lower()
+    email = ADMIN_CONTACT_EMAIL
     password = os.environ.get("ADMIN_PASSWORD", "@Sanket918616")
     if not db.execute("SELECT id FROM users WHERE email=?", (email,)).fetchone():
         db.execute("INSERT INTO users (name,email,password,is_admin) VALUES (?,?,?,?)", ("Administrator", email, generate_password_hash(password), True))
@@ -92,60 +93,32 @@ def init_database():
     db.commit()
 
 def send_email(recipient, subject, body):
-    """Send via an HTTP email API when available (preferred on Render, since
-    outbound SMTP is blocked on Render's free tier):
-      1. Resend  – requires a verified domain to send to arbitrary recipients
-      2. Brevo   – free tier allows 300 email/day, no domain verification needed
-      3. Gmail SMTP – works locally, but blocked on Render free instances
-    Tries each configured provider in order until one succeeds."""
-    resend_key = os.environ.get("RESEND_API_KEY", "").strip()
-    if resend_key:
-        sent = _send_via_resend(resend_key, recipient, subject, body)
-        if sent:
-            return True
-        app.logger.warning(
-            "Resend delivery failed; trying Brevo. For direct Resend delivery, "
-            "verify a domain at https://resend.com/domains and set EMAIL_FROM "
-            "to an address using that domain."
-        )
+    """Send via Brevo's HTTP API when BREVO_API_KEY is set. Required on Render's
+    free tier, since outbound SMTP (ports 25/465/587) has been blocked there
+    since Sept 2025 - smtplib will always time out on a free instance.
+    Falls back to Gmail SMTP only for local development."""
     brevo_key = os.environ.get("BREVO_API_KEY", "").strip()
     if brevo_key:
-        sent = _send_via_brevo(brevo_key, recipient, subject, body)
-        if sent:
-            return True
-        app.logger.warning("Brevo delivery failed; falling back to Gmail SMTP.")
+        return _send_via_brevo(brevo_key, recipient, subject, body)
     return _send_via_smtp(recipient, subject, body)
 
 def _send_via_brevo(api_key, recipient, subject, body):
-    """Send via Brevo's transactional email HTTP API. The sender address is
-    SENDER_EMAIL (defaults to the verified sender sanketsingh9186@gmail.com –
-    no custom domain required on the free plan)."""
-    sender = os.environ.get("SENDER_EMAIL", "sanketsingh9186@gmail.com").strip().lower()
-    sender_name = os.environ.get("SENDER_NAME", "StudySpace").strip()
-    if not sender:
-        app.logger.warning("Brevo delivery skipped: SENDER_EMAIL is not configured.")
+    sender_email = os.environ.get("EMAIL", "").strip()
+    if not sender_email:
+        app.logger.warning("Email was not sent: EMAIL is not configured for the Brevo sender.")
         return False
     try:
         response = requests.post(
             "https://api.brevo.com/v3/smtp/email",
             headers={"api-key": api_key, "Content-Type": "application/json", "Accept": "application/json"},
             json={
-                "sender": {"name": sender_name, "email": sender},
+                "sender": {"name": "StudySpace", "email": sender_email},
                 "to": [{"email": recipient}],
                 "subject": subject,
                 "textContent": body,
             },
             timeout=15,
         )
-        if response.status_code == 401 and "unrecognised IP address" in response.text:
-            app.logger.error(
-                "Brevo blocked the request: the server's IP is not in your Brevo "
-                "authorized IP list. In Brevo, go to Settings > Security > "
-                "Authorised IPs (https://app.brevo.com/security/authorised_ips) and "
-                "either switch to 'No restriction' (recommended for Render free tier, "
-                "whose outbound IPs change) or add this server's IP: 74.220.52.251"
-            )
-            return False
         if response.status_code >= 400:
             app.logger.error("Brevo delivery failed: %s %s", response.status_code, response.text)
             return False
@@ -154,28 +127,11 @@ def _send_via_brevo(api_key, recipient, subject, body):
         app.logger.error("Brevo delivery failed: %s", error)
         return False
 
-def _send_via_resend(api_key, recipient, subject, body):
-    from_address = os.environ.get("EMAIL_FROM", "").strip() or "StudySpace <onboarding@resend.dev>"
-    try:
-        response = requests.post(
-            "https://api.resend.com/emails",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={"from": from_address, "to": [recipient], "subject": subject, "text": body},
-            timeout=15,
-        )
-        if response.status_code >= 400:
-            app.logger.error("Resend delivery failed: %s %s", response.status_code, response.text)
-            return False
-        return True
-    except requests.RequestException as error:
-        app.logger.error("Resend delivery failed: %s", error)
-        return False
-
 def _send_via_smtp(recipient, subject, body):
     sender = os.environ.get("EMAIL", "").strip()
     app_password = os.environ.get("APP_PASSWORD", "").replace(" ", "")
     if not sender or not app_password:
-        app.logger.warning("Email was not sent: no RESEND_API_KEY, and EMAIL/APP_PASSWORD is not configured.")
+        app.logger.warning("Email was not sent: no BREVO_API_KEY, and EMAIL/APP_PASSWORD is not configured.")
         return False
     message = EmailMessage()
     message["From"] = f"StudySpace <{sender}>"
@@ -238,43 +194,6 @@ def login():
         flash("Incorrect email or password.", "error")
     return render_template("auth.html", mode="login")
 
-@app.route("/forgot-password", methods=["GET", "POST"])
-def forgot_password():
-    if request.method == "POST":
-        email = request.form.get("email", "").strip().lower()
-        user = get_db().execute("SELECT id FROM users WHERE email=?", (email,)).fetchone()
-        if user:
-            code = f"{secrets.randbelow(9000) + 1000:04d}"
-            expires_at = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
-            db = get_db()
-            db.execute("INSERT INTO password_reset_otps (email,code_hash,expires_at) VALUES (?,?,?) ON CONFLICT(email) DO UPDATE SET code_hash=excluded.code_hash, expires_at=excluded.expires_at", (email, generate_password_hash(code), expires_at))
-            db.commit()
-            send_email(email, "Your StudySpace password reset code", f"Your password reset OTP is: {code}\n\nIt expires in 10 minutes. Do not share this code with anyone.\n\nRegards,\nStudySpace")
-        flash("If that email has an account, a 4-digit OTP has been sent.", "success")
-        return redirect(url_for("reset_password", email=email))
-    return render_template("forgot_password.html")
-
-@app.route("/reset-password", methods=["GET", "POST"])
-def reset_password():
-    email = request.values.get("email", "").strip().lower()
-    if request.method == "POST":
-        otp = request.form.get("otp", "").strip()
-        password = request.form.get("password", "")
-        entry = get_db().execute("SELECT * FROM password_reset_otps WHERE email=?", (email,)).fetchone()
-        valid = entry and datetime.fromisoformat(entry["expires_at"]) > datetime.now(timezone.utc) and check_password_hash(entry["code_hash"], otp)
-        if not valid:
-            flash("The OTP is invalid or has expired. Request a new one.", "error")
-        elif len(password) < 8:
-            flash("Use a password of at least 8 characters.", "error")
-        else:
-            db = get_db()
-            db.execute("UPDATE users SET password=? WHERE email=?", (generate_password_hash(password), email))
-            db.execute("DELETE FROM password_reset_otps WHERE email=?", (email,))
-            db.commit()
-            flash("Password updated. You can now log in.", "success")
-            return redirect(url_for("login"))
-    return render_template("reset_password.html", email=email)
-
 @app.route("/logout")
 def logout():
     session.clear(); flash("You have been logged out.", "success"); return redirect(url_for("home"))
@@ -292,7 +211,29 @@ def values(): return tuple(request.form.get(k, "").strip() for k in ("title", "d
 @login_required
 @admin_required
 def admin_dashboard():
-    return render_template("admin.html", materials=get_db().execute("SELECT * FROM materials ORDER BY id DESC").fetchall(), edit_item=None)
+    return render_template(
+        "admin.html",
+        materials=get_db().execute("SELECT * FROM materials ORDER BY id DESC").fetchall(),
+        edit_item=None,
+        users=get_db().execute("SELECT id, name, email, is_admin FROM users ORDER BY name").fetchall(),
+    )
+
+@app.route("/admin/users/<int:user_id>/reset-password", methods=["POST"])
+@login_required
+@admin_required
+def reset_user_password(user_id):
+    db = get_db()
+    user = db.execute("SELECT id, name FROM users WHERE id=?", (user_id,)).fetchone()
+    new_password = request.form.get("new_password", "")
+    if not user:
+        flash("User not found.", "error")
+    elif len(new_password) < 8:
+        flash("Use a password of at least 8 characters.", "error")
+    else:
+        db.execute("UPDATE users SET password=? WHERE id=?", (generate_password_hash(new_password), user_id))
+        db.commit()
+        flash(f"Password updated for {user['name']}.", "success")
+    return redirect(url_for("admin_dashboard"))
 
 @app.route("/admin/materials/add", methods=["POST"])
 @login_required
@@ -314,7 +255,7 @@ def edit_material(material_id):
         data=values()
         if all(data): db.execute("UPDATE materials SET title=?,description=?,category=?,drive_url=?,icon=? WHERE id=?", (*data, material_id)); db.commit(); flash("Study material updated.", "success"); return redirect(url_for("admin_dashboard"))
         flash("Complete every material field.", "error")
-    return render_template("admin.html", materials=db.execute("SELECT * FROM materials ORDER BY id DESC").fetchall(), edit_item=item)
+    return render_template("admin.html", materials=db.execute("SELECT * FROM materials ORDER BY id DESC").fetchall(), edit_item=item, users=db.execute("SELECT id, name, email, is_admin FROM users ORDER BY name").fetchall())
 
 @app.route("/admin/materials/<int:material_id>/delete", methods=["POST"])
 @login_required
