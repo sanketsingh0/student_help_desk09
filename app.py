@@ -137,6 +137,15 @@ def _send_via_brevo(api_key, recipient, subject, body):
             },
             timeout=15,
         )
+        if response.status_code == 401 and "unrecognised IP address" in response.text:
+            app.logger.error(
+                "Brevo blocked the request: the server's IP is not in your Brevo "
+                "authorized IP list. In Brevo, go to Settings > Security > "
+                "Authorised IPs (https://app.brevo.com/security/authorised_ips) and "
+                "either switch to 'No restriction' (recommended for Render free tier, "
+                "whose outbound IPs change) or add this server's IP: 74.220.52.251"
+            )
+            return False
         if response.status_code >= 400:
             app.logger.error("Brevo delivery failed: %s %s", response.status_code, response.text)
             return False
