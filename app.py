@@ -1,10 +1,8 @@
 import os
 import secrets
 import sqlite3
-import json
-from urllib import error as urlerror
-from urllib import request as urlrequest
 from datetime import datetime, timedelta, timezone
+import requests
 from functools import wraps
 from pathlib import Path
 
@@ -98,32 +96,35 @@ def send_email(recipient, subject, body):
     """Send transactional email with Resend's HTTPS API.
 
     HTTPS works from Render where direct Gmail SMTP connections may be blocked.
+    The requests library is used instead of urllib because Cloudflare in front
+    of Resend's API blocks Python's urllib TLS fingerprint (HTTP 403, error 1010).
     """
     api_key = os.environ.get("RESEND_API_KEY", "").strip()
     sender = os.environ.get("EMAIL_FROM", "").strip()
     if not api_key or not sender:
         app.logger.warning("Email was not sent: RESEND_API_KEY or EMAIL_FROM is not configured.")
         return False
-    payload = json.dumps({
-        "from": f"StudySpace <{sender}>",
-        "to": [recipient],
-        "subject": subject,
-        "text": body,
-    }).encode("utf-8")
-    api_request = urlrequest.Request(
-        "https://api.resend.com/emails",
-        data=payload,
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
     try:
-        with urlrequest.urlopen(api_request, timeout=15):
-            pass
+        response = requests.post(
+            "https://api.resend.com/emails",
+            json={
+                "from": f"StudySpace <{sender}>",
+                "to": [recipient],
+                "subject": subject,
+                "text": body,
+            },
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=15,
+        )
+        if response.status_code >= 400:
+            app.logger.error(
+                "Email delivery failed: HTTP Error %s: %s",
+                response.status_code,
+                response.text,
+            )
+            return False
         return True
-    except (OSError, urlerror.URLError, urlerror.HTTPError) as error:
+    except requests.RequestException as error:
         app.logger.error("Email delivery failed: %s", error)
         return False
 
