@@ -38,11 +38,15 @@ The app tries these providers in order until one succeeds:
    - **Important:** If you get a `401 unrecognised IP address` error from Brevo, allowlist your server IP at [app.brevo.com/security/authorised_ips](https://app.brevo.com/security/authorised_ips) (on Render free tier, set it to **No restriction** since the outbound IP can change).
 3. **Gmail SMTP** – set `EMAIL` and `APP_PASSWORD` (a Gmail app password). Works locally, but note Render's free tier **blocks outbound SMTP**, so this fallback generally only works when running locally.
 
-## Managing user passwords
+## Managing users
 
 - There is **no self-service password reset** (no OTP flow).
-- The **administrator** can change any user's password from the **Admin panel** under **Manage user passwords**.
-- The admin enters a new password (minimum 8 characters) for the selected user and clicks **Change password**.
+- The **administrator** can manage all user accounts from the **Admin panel** → **Manage users**.
+- The user management module provides:
+  - A **table view** of all registered users (ID, name, email, role).
+  - A **search box** to filter users by name or email.
+  - **Edit** — change a user's name, email, role (student/admin), or set a new password (minimum 8 characters).
+  - **Delete** — remove a student account (admin accounts and your own account cannot be deleted).
 
 ## Deploy on Render
 

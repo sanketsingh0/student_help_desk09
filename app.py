@@ -215,25 +215,68 @@ def admin_dashboard():
         "admin.html",
         materials=get_db().execute("SELECT * FROM materials ORDER BY id DESC").fetchall(),
         edit_item=None,
-        users=get_db().execute("SELECT id, name, email, is_admin FROM users ORDER BY name").fetchall(),
     )
 
-@app.route("/admin/users/<int:user_id>/reset-password", methods=["POST"])
+@app.route("/admin/users")
 @login_required
 @admin_required
-def reset_user_password(user_id):
+def admin_users():
+    search = request.args.get("q", "").strip()
     db = get_db()
-    user = db.execute("SELECT id, name FROM users WHERE id=?", (user_id,)).fetchone()
-    new_password = request.form.get("new_password", "")
+    if search:
+        users = db.execute("SELECT id, name, email, is_admin FROM users WHERE name LIKE ? OR email LIKE ? ORDER BY name", (f"%{search}%", f"%{search}%")).fetchall()
+    else:
+        users = db.execute("SELECT id, name, email, is_admin FROM users ORDER BY name").fetchall()
+    return render_template("admin_users.html", users=users, search=search, edit_user=None)
+
+@app.route("/admin/users/<int:user_id>/edit", methods=["GET", "POST"])
+@login_required
+@admin_required
+def edit_user(user_id):
+    db = get_db()
+    user = db.execute("SELECT id, name, email, is_admin FROM users WHERE id=?", (user_id,)).fetchone()
     if not user:
         flash("User not found.", "error")
-    elif len(new_password) < 8:
-        flash("Use a password of at least 8 characters.", "error")
+        return redirect(url_for("admin_users"))
+    if request.method == "POST":
+        name = request.form.get("name", "").strip()
+        email = request.form.get("email", "").strip().lower()
+        is_admin = 1 if request.form.get("is_admin") else 0
+        new_password = request.form.get("new_password", "")
+        if not name or not email:
+            flash("Name and email are required.", "error")
+        else:
+            try:
+                db.execute("UPDATE users SET name=?, email=?, is_admin=? WHERE id=?", (name, email, is_admin, user_id))
+                if new_password:
+                    if len(new_password) < 8:
+                        flash("Password must be at least 8 characters.", "error")
+                        return render_template("admin_users.html", users=db.execute("SELECT id, name, email, is_admin FROM users ORDER BY name").fetchall(), search="", edit_user=user)
+                    db.execute("UPDATE users SET password=? WHERE id=?", (generate_password_hash(new_password), user_id))
+                db.commit()
+                flash(f"User {name} updated.", "success")
+                return redirect(url_for("admin_users"))
+            except (sqlite3.IntegrityError, psycopg_errors.UniqueViolation):
+                flash("An account with this email already exists.", "error")
+    return render_template("admin_users.html", users=db.execute("SELECT id, name, email, is_admin FROM users ORDER BY name").fetchall(), search="", edit_user=user)
+
+@app.route("/admin/users/<int:user_id>/delete", methods=["POST"])
+@login_required
+@admin_required
+def delete_user(user_id):
+    db = get_db()
+    user = db.execute("SELECT id, name, is_admin FROM users WHERE id=?", (user_id,)).fetchone()
+    if not user:
+        flash("User not found.", "error")
+    elif user["is_admin"]:
+        flash("Cannot delete an administrator account.", "error")
+    elif user_id == session.get("user_id"):
+        flash("You cannot delete your own account.", "error")
     else:
-        db.execute("UPDATE users SET password=? WHERE id=?", (generate_password_hash(new_password), user_id))
+        db.execute("DELETE FROM users WHERE id=?", (user_id,))
         db.commit()
-        flash(f"Password updated for {user['name']}.", "success")
-    return redirect(url_for("admin_dashboard"))
+        flash(f"User {user['name']} deleted.", "success")
+    return redirect(url_for("admin_users"))
 
 @app.route("/admin/materials/add", methods=["POST"])
 @login_required
@@ -255,7 +298,7 @@ def edit_material(material_id):
         data=values()
         if all(data): db.execute("UPDATE materials SET title=?,description=?,category=?,drive_url=?,icon=? WHERE id=?", (*data, material_id)); db.commit(); flash("Study material updated.", "success"); return redirect(url_for("admin_dashboard"))
         flash("Complete every material field.", "error")
-    return render_template("admin.html", materials=db.execute("SELECT * FROM materials ORDER BY id DESC").fetchall(), edit_item=item, users=db.execute("SELECT id, name, email, is_admin FROM users ORDER BY name").fetchall())
+    return render_template("admin.html", materials=db.execute("SELECT * FROM materials ORDER BY id DESC").fetchall(), edit_item=item)
 
 @app.route("/admin/materials/<int:material_id>/delete", methods=["POST"])
 @login_required
