@@ -1,0 +1,89 @@
+{% extends 'base.html' %}
+{% block title %}Teacher Panel | StudySpace{% endblock %}
+{% block content %}
+<main class="admin-page">
+  <div class="admin-heading">
+    <p class="eyebrow">TEACHER ACCESS</p>
+    <h1>Students' work</h1>
+    <p>See every task students have logged, mark it completed or not, and set how much (%) of it is done.</p>
+  </div>
+
+  <div class="stat-cards">
+    <div class="stat-card"><b>{{ total }}</b><span>Tasks shown</span></div>
+    <div class="stat-card"><b>{{ completed }}</b><span>Completed</span></div>
+    <div class="stat-card"><b>{{ in_progress }}</b><span>In progress</span></div>
+    <div class="stat-card"><b>{{ avg_progress }}%</b><span>Average progress</span></div>
+  </div>
+
+  <section class="user-table-section">
+    <div class="user-table-toolbar">
+      <form class="search-form" method="get" action="{{ url_for('teacher_panel') }}">
+        <select name="subject_code">
+          <option value="">All subject codes</option>
+          {% for row in subject_codes %}
+          <option value="{{ row.subject_code }}" {% if row.subject_code == subject_code %}selected{% endif %}>{{ row.subject_code }}</option>
+          {% endfor %}
+        </select>
+        <select name="student_id">
+          <option value="">All students</option>
+          {% for student in students %}
+          <option value="{{ student.id }}" {% if student.id|string == selected_student %}selected{% endif %}>{{ student.name }}{% if student.student_id %} ({{ student.student_id }}){% endif %}</option>
+          {% endfor %}
+        </select>
+        <button type="submit">Filter</button>
+        {% if subject_code or selected_student %}<a class="clear-search" href="{{ url_for('teacher_panel') }}">Clear</a>{% endif %}
+      </form>
+      <p class="user-count">{{ total }} task{{ 's' if total != 1 else '' }}</p>
+    </div>
+    <div class="table-wrap">
+      <table class="user-table wide">
+        <thead><tr><th>Student</th><th>Task</th><th>Status</th><th>Progress</th><th>Grade & mark</th></tr></thead>
+        <tbody>
+        {% for task in tasks %}
+          <tr>
+            <td class="task-cell"><b>{{ task.student_name }}</b><small>{{ task.student_email }}{% if task.student_roll %} · Roll: {{ task.student_roll }}{% endif %}</small></td>
+            <td class="task-cell">
+              <b>{{ task.subject_code }} · {{ task.title }}</b>
+              <small>{{ task.category }}{% if task.subject_name %} · {{ task.subject_name }}{% endif %}</small>
+              <small>{{ task.description }}</small>
+              {% if task.work_details %}<details class="task-works"><summary>Student's work so far</summary><p>{{ task.work_details }}</p></details>{% endif %}
+            </td>
+            <td>{% if task.status == 'completed' %}<span class="role-badge completed">Completed</span>{% elif task.status == 'in_progress' %}<span class="role-badge in_progress">In progress</span>{% else %}<span class="role-badge pending">Pending</span>{% endif %}</td>
+            <td><span class="progress-track"><span class="progress-fill" style="width:{{ task.progress }}%"></span></span><span class="progress-num">{{ task.progress }}%</span></td>
+            <td>
+              <form class="teacher-form" method="post" action="{{ url_for('teacher_update_task', task_id=task.id) }}">
+                <input type="hidden" name="subject_code" value="{{ subject_code }}">
+                <input type="hidden" name="student_id" value="{{ selected_student }}">
+                <select class="status-select" name="status">
+                  <option value="pending" {% if task.status == 'pending' %}selected{% endif %}>Pending</option>
+                  <option value="in_progress" {% if task.status == 'in_progress' %}selected{% endif %}>In progress</option>
+                  <option value="completed" {% if task.status == 'completed' %}selected{% endif %}>Completed</option>
+                </select>
+                <div class="progress-range">
+                  <input type="range" min="0" max="100" step="5" name="progress" value="{{ task.progress }}" oninput="this.nextElementSibling.textContent = this.value + '%'">
+                  <span class="progress-value">{{ task.progress }}%</span>
+                </div>
+                <input class="remark-input" type="text" name="remark" placeholder="Remark (optional)" value="{{ task.teacher_remark }}">
+                <button class="save-btn" type="submit">Save</button>
+              </form>
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="5" class="empty-row">No student tasks yet{% if subject_code or selected_student %} matching these filters{% endif %}.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</main>
+<script>
+  // When a teacher selects "Completed", lock progress to 100%.
+  document.querySelectorAll('.teacher-form').forEach(function (form) {
+    var status = form.querySelector('.status-select');
+    var range = form.querySelector('input[type=range]');
+    status.addEventListener('change', function () {
+      if (status.value === 'completed') { range.value = 100; range.nextElementSibling.textContent = '100%'; }
+    });
+  });
+</script>
+{% endblock %}

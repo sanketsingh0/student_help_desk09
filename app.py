@@ -2,6 +2,7 @@ import os
 import sqlite3
 import smtplib
 from email.message import EmailMessage
+from datetime import datetime
 from functools import wraps
 from pathlib import Path
 
@@ -54,6 +55,9 @@ class DatabaseConnection:
     def close(self):
         self.connection.close()
 
+    def rollback(self):
+        self.connection.rollback()
+
 def get_db():
     if "db" not in g:
         if DATABASE_URL:
@@ -73,13 +77,49 @@ def close_db(_error):
 def init_database():
     db = get_db()
     if DATABASE_URL:
-        db.execute("CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, password TEXT NOT NULL, is_admin BOOLEAN NOT NULL DEFAULT FALSE)")
+        db.execute("""CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            email TEXT NOT NULL UNIQUE,
+            password TEXT NOT NULL,
+            is_admin BOOLEAN NOT NULL DEFAULT FALSE,
+            is_teacher BOOLEAN NOT NULL DEFAULT FALSE,
+            student_id TEXT)""")
         db.execute("CREATE TABLE IF NOT EXISTS materials (id SERIAL PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL, category TEXT NOT NULL, drive_url TEXT NOT NULL, icon TEXT NOT NULL DEFAULT '📚')")
+        db.execute("""CREATE TABLE IF NOT EXISTS student_tasks (
+            id SERIAL PRIMARY KEY,
+            student_id INTEGER NOT NULL,
+            subject_code TEXT NOT NULL,
+            subject_name TEXT NOT NULL DEFAULT '',
+            category TEXT NOT NULL DEFAULT 'Assignment',
+            title TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            work_details TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'pending',
+            progress INTEGER NOT NULL DEFAULT 0,
+            teacher_remark TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL DEFAULT '')""")
     else:
         db.executescript("""
-        CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, password TEXT NOT NULL, is_admin INTEGER NOT NULL DEFAULT 0);
+        CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, password TEXT NOT NULL, is_admin INTEGER NOT NULL DEFAULT 0, is_teacher INTEGER NOT NULL DEFAULT 0, student_id TEXT);
         CREATE TABLE IF NOT EXISTS materials (id INTEGER PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL, category TEXT NOT NULL, drive_url TEXT NOT NULL, icon TEXT NOT NULL DEFAULT '📚');
+        CREATE TABLE IF NOT EXISTS student_tasks (id INTEGER PRIMARY KEY, student_id INTEGER NOT NULL, subject_code TEXT NOT NULL, subject_name TEXT NOT NULL DEFAULT '', category TEXT NOT NULL DEFAULT 'Assignment', title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', work_details TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'pending', progress INTEGER NOT NULL DEFAULT 0, teacher_remark TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT '');
         """)
+    # Migrate databases created before the teacher/student-id columns existed.
+    try:
+        if DATABASE_URL:
+            db.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_teacher BOOLEAN NOT NULL DEFAULT FALSE")
+            db.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS student_id TEXT")
+        else:
+            columns = [row["name"] for row in db.execute("PRAGMA table_info(users)").fetchall()]
+            if "is_teacher" not in columns:
+                db.execute("ALTER TABLE users ADD COLUMN is_teacher INTEGER NOT NULL DEFAULT 0")
+            if "student_id" not in columns:
+                db.execute("ALTER TABLE users ADD COLUMN student_id TEXT")
+        db.commit()
+    except Exception as error:
+        app.logger.warning("Optional column migration skipped: %s", error)
     admin_email = ADMIN_CONTACT_EMAIL
     admin_password = os.environ.get("ADMIN_PASSWORD", "").strip()
     if not admin_email or not admin_password:
@@ -172,6 +212,15 @@ def admin_required(view):
         return view(*args, **kwargs)
     return wrapped
 
+def teacher_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not (session.get("is_admin") or session.get("is_teacher")):
+            flash("Teacher access is required. Ask an administrator to mark your account as a teacher.", "error")
+            return redirect(url_for("home"))
+        return view(*args, **kwargs)
+    return wrapped
+
 @app.route("/")
 def home():
     return render_template("index.html", materials=get_db().execute("SELECT * FROM materials ORDER BY id DESC").fetchall())
@@ -180,10 +229,11 @@ def home():
 def register():
     if request.method == "POST":
         name, email, password = request.form.get("name", "").strip(), request.form.get("email", "").strip().lower(), request.form.get("password", "")
+        student_id = request.form.get("student_id", "").strip().upper()
         if not name or not email or len(password) < 8: flash("Enter your name, email, and a password of at least 8 characters.", "error")
         else:
             try:
-                db = get_db(); db.execute("INSERT INTO users (name,email,password) VALUES (?,?,?)", (name, email, generate_password_hash(password))); db.commit()
+                db = get_db(); db.execute("INSERT INTO users (name,email,password,student_id) VALUES (?,?,?,?)", (name, email, generate_password_hash(password), student_id or None)); db.commit()
                 greeting_sent = send_email(email, "Welcome to StudySpace", f"Hi {name},\n\nWelcome to StudySpace! Your account is ready. You can now log in and access study materials.\n\nRegards,\nStudySpace")
                 flash("Registration successful. A welcome email has been sent." if greeting_sent else "Registration successful. Please log in.", "success"); return redirect(url_for("login"))
             except (sqlite3.IntegrityError, psycopg_errors.UniqueViolation):
@@ -193,12 +243,18 @@ def register():
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        email, password = request.form.get("email", "").strip().lower(), request.form.get("password", "")
-        user = get_db().execute("SELECT * FROM users WHERE email=?", (email,)).fetchone()
+        login_id = request.form.get("email", "").strip().lower()
+        password = request.form.get("password", "")
+        user = get_db().execute("SELECT * FROM users WHERE email=? OR student_id=? OR student_id=?", (login_id, login_id, login_id.upper())).fetchone()
         if user and check_password_hash(user["password"], password):
-            session.clear(); session.update(user_id=user["id"], user_name=user["name"], is_admin=bool(user["is_admin"]))
-            return redirect(url_for("admin_dashboard") if user["is_admin"] else url_for("home"))
-        flash("Incorrect email or password.", "error")
+            session.clear()
+            session.update(user_id=user["id"], user_name=user["name"], is_admin=bool(user["is_admin"]), is_teacher=bool(user["is_teacher"]), student_id=user["student_id"] or "")
+            if user["is_admin"]:
+                return redirect(url_for("admin_dashboard"))
+            if user["is_teacher"]:
+                return redirect(url_for("teacher_panel"))
+            return redirect(url_for("home"))
+        flash("Incorrect login id or password.", "error")
     return render_template("auth.html", mode="login")
 
 @app.route("/forgot-password")
@@ -235,9 +291,9 @@ def admin_users():
     search = request.args.get("q", "").strip()
     db = get_db()
     if search:
-        users = db.execute("SELECT id, name, email, is_admin FROM users WHERE name LIKE ? OR email LIKE ? ORDER BY name", (f"%{search}%", f"%{search}%")).fetchall()
+        users = db.execute("SELECT id, name, email, is_admin, is_teacher FROM users WHERE name LIKE ? OR email LIKE ? ORDER BY name", (f"%{search}%", f"%{search}%")).fetchall()
     else:
-        users = db.execute("SELECT id, name, email, is_admin FROM users ORDER BY name").fetchall()
+        users = db.execute("SELECT id, name, email, is_admin, is_teacher FROM users ORDER BY name").fetchall()
     return render_template("admin_users.html", users=users, search=search, edit_user=None)
 
 @app.route("/admin/users/<int:user_id>/edit", methods=["GET", "POST"])
@@ -245,7 +301,7 @@ def admin_users():
 @admin_required
 def edit_user(user_id):
     db = get_db()
-    user = db.execute("SELECT id, name, email, is_admin FROM users WHERE id=?", (user_id,)).fetchone()
+    user = db.execute("SELECT id, name, email, is_admin, is_teacher FROM users WHERE id=?", (user_id,)).fetchone()
     if not user:
         flash("User not found.", "error")
         return redirect(url_for("admin_users"))
@@ -253,23 +309,24 @@ def edit_user(user_id):
         name = request.form.get("name", "").strip()
         email = request.form.get("email", "").strip().lower()
         is_admin = bool(request.form.get("is_admin"))
+        is_teacher = bool(request.form.get("is_teacher"))
         new_password = request.form.get("new_password", "")
         if not name or not email:
             flash("Name and email are required.", "error")
         else:
             try:
-                db.execute("UPDATE users SET name=?, email=?, is_admin=? WHERE id=?", (name, email, is_admin, user_id))
+                db.execute("UPDATE users SET name=?, email=?, is_admin=?, is_teacher=? WHERE id=?", (name, email, is_admin, is_teacher, user_id))
                 if new_password:
                     if len(new_password) < 8:
                         flash("Password must be at least 8 characters.", "error")
-                        return render_template("admin_users.html", users=db.execute("SELECT id, name, email, is_admin FROM users ORDER BY name").fetchall(), search="", edit_user=user)
+                        return render_template("admin_users.html", users=db.execute("SELECT id, name, email, is_admin, is_teacher FROM users ORDER BY name").fetchall(), search="", edit_user=user)
                     db.execute("UPDATE users SET password=? WHERE id=?", (generate_password_hash(new_password), user_id))
                 db.commit()
                 flash(f"User {name} updated.", "success")
                 return redirect(url_for("admin_users"))
             except (sqlite3.IntegrityError, psycopg_errors.UniqueViolation):
                 flash("An account with this email already exists.", "error")
-    return render_template("admin_users.html", users=db.execute("SELECT id, name, email, is_admin FROM users ORDER BY name").fetchall(), search="", edit_user=user)
+    return render_template("admin_users.html", users=db.execute("SELECT id, name, email, is_admin, is_teacher FROM users ORDER BY name").fetchall(), search="", edit_user=user)
 
 @app.route("/admin/users/<int:user_id>/delete", methods=["POST"])
 @login_required
@@ -317,6 +374,136 @@ def edit_material(material_id):
 def delete_material(material_id):
     db=get_db(); db.execute("DELETE FROM materials WHERE id=?", (material_id,)); db.commit(); flash("Study material removed.", "success")
     return redirect(url_for("admin_dashboard"))
+
+# ---------------------------------------------------------------- students
+def _now():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+@app.route("/my-tasks")
+@login_required
+def student_tasks():
+    db = get_db()
+    subject_code = request.args.get("subject_code", "").strip().upper()
+    if subject_code:
+        tasks = db.execute("SELECT * FROM student_tasks WHERE student_id=? AND subject_code=? ORDER BY id DESC", (session["user_id"], subject_code)).fetchall()
+    else:
+        tasks = db.execute("SELECT * FROM student_tasks WHERE student_id=? ORDER BY id DESC", (session["user_id"],)).fetchall()
+    codes = db.execute("SELECT DISTINCT subject_code FROM student_tasks WHERE student_id=? ORDER BY subject_code", (session["user_id"],)).fetchall()
+    return render_template("student_tasks.html", tasks=tasks, edit_task=None, subject_code=subject_code, subject_codes=codes)
+
+@app.route("/tasks/add", methods=["POST"])
+@login_required
+def add_task():
+    subject_code = request.form.get("subject_code", "").strip().upper()
+    subject_name = request.form.get("subject_name", "").strip()
+    category = request.form.get("category", "").strip()
+    title = request.form.get("title", "").strip()
+    description = request.form.get("description", "").strip()
+    work_details = request.form.get("work_details", "").strip()
+    if not subject_code or not category or not title:
+        flash("Subject code, category, and task title are required.", "error")
+    else:
+        now = _now()
+        db = get_db()
+        db.execute("INSERT INTO student_tasks (student_id, subject_code, subject_name, category, title, description, work_details, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            (session["user_id"], subject_code, subject_name, category, title, description, work_details, now, now))
+        db.commit()
+        flash("Task added to your panel.", "success")
+    return redirect(url_for("student_tasks"))
+
+@app.route("/tasks/<int:task_id>/edit", methods=["GET", "POST"])
+@login_required
+def edit_task(task_id):
+    db = get_db()
+    task = db.execute("SELECT * FROM student_tasks WHERE id=? AND student_id=?", (task_id, session["user_id"])).fetchone()
+    if not task:
+        flash("Task not found.", "error")
+        return redirect(url_for("student_tasks"))
+    if request.method == "POST":
+        subject_code = request.form.get("subject_code", "").strip().upper()
+        subject_name = request.form.get("subject_name", "").strip()
+        category = request.form.get("category", "").strip()
+        title = request.form.get("title", "").strip()
+        description = request.form.get("description", "").strip()
+        work_details = request.form.get("work_details", "").strip()
+        if not subject_code or not category or not title:
+            flash("Subject code, category, and task title are required.", "error")
+        else:
+            db.execute("UPDATE student_tasks SET subject_code=?, subject_name=?, category=?, title=?, description=?, work_details=?, updated_at=? WHERE id=? AND student_id=?",
+                (subject_code, subject_name, category, title, description, work_details, _now(), task_id, session["user_id"]))
+            db.commit()
+            flash("Task updated.", "success")
+            return redirect(url_for("student_tasks"))
+    tasks = db.execute("SELECT * FROM student_tasks WHERE student_id=? ORDER BY id DESC", (session["user_id"],)).fetchall()
+    codes = db.execute("SELECT DISTINCT subject_code FROM student_tasks WHERE student_id=? ORDER BY subject_code", (session["user_id"],)).fetchall()
+    return render_template("student_tasks.html", tasks=tasks, edit_task=task, subject_code="", subject_codes=codes)
+
+@app.route("/tasks/<int:task_id>/delete", methods=["POST"])
+@login_required
+def delete_task(task_id):
+    db = get_db()
+    db.execute("DELETE FROM student_tasks WHERE id=? AND student_id=?", (task_id, session["user_id"]))
+    db.commit()
+    flash("Task removed.", "success")
+    return redirect(url_for("student_tasks"))
+
+# ---------------------------------------------------------------- teacher panel
+@app.route("/teacher")
+@login_required
+@teacher_required
+def teacher_panel():
+    db = get_db()
+    subject_code = request.args.get("subject_code", "").strip().upper()
+    student_filter = request.args.get("student_id", "").strip()
+    query = ("SELECT t.*, u.name AS student_name, u.email AS student_email, u.student_id AS student_roll "
+             "FROM student_tasks t JOIN users u ON u.id = t.student_id")
+    where, params = [], []
+    if subject_code:
+        where.append("t.subject_code=?")
+        params.append(subject_code)
+    if student_filter.isdigit():
+        where.append("t.student_id=?")
+        params.append(int(student_filter))
+    if where:
+        query += " WHERE " + " AND ".join(where)
+    query += " ORDER BY t.id DESC"
+    tasks = db.execute(query, params).fetchall()
+    students = db.execute("SELECT id, name, student_id FROM users WHERE NOT is_admin AND NOT is_teacher ORDER BY name").fetchall()
+    codes = db.execute("SELECT DISTINCT subject_code FROM student_tasks ORDER BY subject_code").fetchall()
+    total = len(tasks)
+    completed = sum(1 for t in tasks if t["status"] == "completed")
+    in_progress = sum(1 for t in tasks if t["status"] == "in_progress")
+    avg_progress = round(sum(t["progress"] for t in tasks) / total) if total else 0
+    return render_template("teacher.html", tasks=tasks, students=students, subject_codes=codes,
+        subject_code=subject_code, selected_student=student_filter, total=total,
+        completed=completed, in_progress=in_progress, avg_progress=avg_progress)
+
+@app.route("/teacher/tasks/<int:task_id>/update", methods=["POST"])
+@login_required
+@teacher_required
+def teacher_update_task(task_id):
+    db = get_db()
+    if not db.execute("SELECT id FROM student_tasks WHERE id=?", (task_id,)).fetchone():
+        flash("Task not found.", "error")
+        return redirect(url_for("teacher_panel"))
+    status = request.form.get("status", "pending").strip()
+    if status not in ("pending", "in_progress", "completed"):
+        status = "pending"
+    try:
+        progress = int(request.form.get("progress", "0"))
+    except ValueError:
+        progress = 0
+    progress = max(0, min(100, progress))
+    if status == "completed":
+        progress = 100
+    remark = request.form.get("remark", "").strip()
+    db.execute("UPDATE student_tasks SET status=?, progress=?, teacher_remark=?, updated_at=? WHERE id=?",
+        (status, progress, remark, _now(), task_id))
+    db.commit()
+    flash("Task status updated.", "success")
+    return redirect(url_for("teacher_panel",
+        subject_code=request.form.get("subject_code", ""),
+        student_id=request.form.get("student_id", "")))
 
 with app.app_context(): init_database()
 if __name__ == "__main__": app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)), debug=True)

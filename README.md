@@ -49,6 +49,22 @@ The app tries these providers in order until one succeeds:
   - **Edit** — change a user's name, email, role (student/admin), or set a new password (minimum 8 characters).
   - **Delete** — remove a student account (admin accounts and your own account cannot be deleted).
 
+## Student tasks panel and Teacher panel
+
+Students can log the college assignments/projects they are working on, and teachers can review and grade them. The data is stored in the same database (SQLite locally, PostgreSQL on Render).
+
+- **Students** — after logging in, click **My tasks**:
+  - Add tasks with a **subject code** (e.g. `CS301`), subject name, **category** (Assignment / Project / Lab work / Practical / Quiz, etc.), a title, a description, and work-done notes.
+  - **Filter** their own tasks by subject code.
+  - See the current status badge and a **progress % bar** set by the teacher.
+- **Teachers** — the administrator marks an account as a **Teacher** from **Admin panel → Manage users → Edit → Teacher**. Teachers then see the **Teacher panel**:
+  - Every student's logged task with the student's name, email, and rolling ID.
+  - **Filter by subject code** and/or by a specific student.
+  - **Mark** each task as Pending / In progress / **Completed**, set a **0–100 % progress range**, and leave a private remark.
+  - Stats cards (total, completed, in progress, average progress).
+
+Note: `ADMIN_PASSWORD` for Render as well as `DATABASE_URL` configure the deployed database — all task data is saved there.
+
 ## Deploy on Render
 
 1. Upload this project to a GitHub repository.

@@ -1,0 +1,71 @@
+{% extends 'base.html' %}
+{% block title %}My Tasks | StudySpace{% endblock %}
+{% block content %}
+<main class="admin-page">
+  <div class="admin-heading">
+    <p class="eyebrow">MY COLLEGE WORKSPACE</p>
+    <h1>My tasks</h1>
+    <p>Log your college assignments and projects{% if session.get('student_id') %} · Student ID: <b>{{ session.get('student_id') }}</b>{% endif %}. Teachers can review and grade this panel.</p>
+  </div>
+  <div class="admin-layout">
+    <form class="material-form" method="post" action="{% if edit_task %}{{ url_for('edit_task', task_id=edit_task.id) }}{% else %}{{ url_for('add_task') }}{% endif %}">
+      <h2>{{ 'Edit task' if edit_task else 'Add a task' }}</h2>
+      <label>Subject code<input name="subject_code" required placeholder="e.g. CS301" value="{{ edit_task.subject_code if edit_task else '' }}"></label>
+      <label>Subject name<input name="subject_name" placeholder="e.g. Data Structures" value="{{ edit_task.subject_name if edit_task else '' }}"></label>
+      <label>Category
+        <select name="category" required>
+          <option value="">Choose a category</option>
+          {% for option in ['Assignment', 'Project', 'Lab work', 'Practical', 'Quiz', 'Seminar', 'Other'] %}
+          <option value="{{ option }}" {% if edit_task and edit_task.category == option %}selected{% endif %}>{{ option }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Task title<input name="title" required placeholder="e.g. Write a report on sorting algorithms" value="{{ edit_task.title if edit_task else '' }}"></label>
+      <label>Description<textarea name="description" required placeholder="What the task is about">{{ edit_task.description if edit_task else '' }}</textarea></label>
+      <label>Work done / notes<textarea name="work_details" placeholder="What you have completed so far...">{{ edit_task.work_details if edit_task else '' }}</textarea></label>
+      <button class="button" type="submit">{{ 'Save changes' if edit_task else 'Add task' }}</button>
+      {% if edit_task %}<a class="cancel-link" href="{{ url_for('student_tasks') }}">Cancel editing</a>{% endif %}
+    </form>
+    <section class="user-table-section" style="margin-top:0">
+      <div class="user-table-toolbar">
+        <form class="search-form" method="get" action="{{ url_for('student_tasks') }}">
+          <select name="subject_code">
+            <option value="">All subjects</option>
+            {% for row in subject_codes %}
+            <option value="{{ row.subject_code }}" {% if row.subject_code == subject_code %}selected{% endif %}>{{ row.subject_code }}</option>
+            {% endfor %}
+          </select>
+          <button type="submit">Filter</button>
+          {% if subject_code %}<a class="clear-search" href="{{ url_for('student_tasks') }}">Clear</a>{% endif %}
+        </form>
+        <p class="user-count">{{ tasks|length }} task{{ 's' if tasks|length != 1 else '' }}</p>
+      </div>
+      <div class="table-wrap">
+        <table class="user-table">
+          <thead><tr><th>Subject</th><th>Task</th><th>Category</th><th>Status</th><th>Progress</th><th>Actions</th></tr></thead>
+          <tbody>
+          {% for task in tasks %}
+            <tr>
+              <td><span class="chip">{{ task.subject_code }}</span>{% if task.subject_name %}<small style="display:block;color:var(--muted);font-size:.75rem">{{ task.subject_name }}</small>{% endif %}</td>
+              <td class="task-cell"><b>{{ task.title }}</b><small>{{ task.description }}</small>
+                {% if task.work_details %}<details class="task-works"><summary>My work so far</summary><p>{{ task.work_details }}</p></details>{% endif %}
+                {% if task.teacher_remark %}<details class="task-works" open><summary>Teacher remark</summary><p>{{ task.teacher_remark }}</p></details>{% endif %}
+              </td>
+              <td>{{ task.category }}</td>
+              <td>{% if task.status == 'completed' %}<span class="role-badge completed">Completed</span>{% elif task.status == 'in_progress' %}<span class="role-badge in_progress">In progress</span>{% else %}<span class="role-badge pending">Pending</span>{% endif %}</td>
+              <td><span class="progress-track"><span class="progress-fill" style="width:{{ task.progress }}%"></span></span><span class="progress-num">{{ task.progress }}%</span></td>
+              <td class="table-actions">
+                <a class="edit-btn" href="{{ url_for('edit_task', task_id=task.id) }}">Edit</a>
+                <form method="post" action="{{ url_for('delete_task', task_id=task.id) }}" onsubmit="return confirm('Delete this task? This cannot be undone.');"><button class="delete-btn" type="submit">Delete</button></form>
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="6" class="empty-row">No tasks added yet. Add your first college task on the left.</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</main>
+{% endblock %}
