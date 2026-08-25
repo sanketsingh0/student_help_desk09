@@ -20,8 +20,8 @@
           {% endfor %}
         </select>
       </label>
-      <label>Task title<input name="title" required placeholder="e.g. Write a report on sorting algorithms" value="{{ edit_task.title if edit_task else '' }}"></label>
-      <label>Description<textarea name="description" required placeholder="What the task is about">{{ edit_task.description if edit_task else '' }}</textarea></label>
+      <label>Task title<input name="title" placeholder="e.g. Write a report on sorting algorithms" value="{{ edit_task.title if edit_task else '' }}"></label>
+      <label>Description<textarea name="description" placeholder="What the task is about (optional)">{{ edit_task.description if edit_task else '' }}</textarea></label>
       <label>Work done / notes<textarea name="work_details" placeholder="What you have completed so far...">{{ edit_task.work_details if edit_task else '' }}</textarea></label>
       <label>Submission link (Google Drive, optional)<input name="work_link" type="url" placeholder="https://drive.google.com/..." value="{{ edit_task.work_link if edit_task else '' }}"></label>
       <button class="button" type="submit">{{ 'Save changes' if edit_task else 'Add task' }}</button>

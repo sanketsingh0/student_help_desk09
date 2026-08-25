@@ -406,13 +406,13 @@ def add_task():
     description = request.form.get("description", "").strip()
     work_details = request.form.get("work_details", "").strip()
     work_link = request.form.get("work_link", "").strip()
-    if not subject_code or not category or not title:
-        flash("Subject code, category, and task title are required.", "error")
+    if not subject_code or not category:
+        flash("Subject code and category are required.", "error")
     else:
         now = _now()
         db = get_db()
         db.execute("INSERT INTO student_tasks (student_id, subject_code, subject_name, category, title, description, work_details, work_link, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
-            (session["user_id"], subject_code, subject_name, category, title, description, work_details, work_link, now, now))
+            (session["user_id"], subject_code, subject_name, category, title or "Untitled task", description, work_details, work_link, now, now))
         db.commit()
         flash("Task added to your panel.", "success")
     return redirect(url_for("student_tasks"))
@@ -433,11 +433,11 @@ def edit_task(task_id):
         description = request.form.get("description", "").strip()
         work_details = request.form.get("work_details", "").strip()
         work_link = request.form.get("work_link", "").strip()
-        if not subject_code or not category or not title:
-            flash("Subject code, category, and task title are required.", "error")
+        if not subject_code or not category:
+            flash("Subject code and category are required.", "error")
         else:
             db.execute("UPDATE student_tasks SET subject_code=?, subject_name=?, category=?, title=?, description=?, work_details=?, work_link=?, updated_at=? WHERE id=? AND student_id=?",
-                (subject_code, subject_name, category, title, description, work_details, work_link, _now(), task_id, session["user_id"]))
+                (subject_code, subject_name, category, title or "Untitled task", description, work_details, work_link, _now(), task_id, session["user_id"]))
             db.commit()
             flash("Task updated.", "success")
             return redirect(url_for("student_tasks"))
