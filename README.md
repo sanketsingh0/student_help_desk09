@@ -40,7 +40,8 @@ The app tries these providers in order until one succeeds:
 
 ## Managing users
 
-- There is **no self-service password reset** (no OTP flow).
+- There is **no self-service password reset** (no OTP flow). Users who forget their password click **Forgot password?** on the login page and are directed to contact the administrator.
+- Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` in your `.env` file (or Render environment). The app reads the admin credentials **only from the environment** — nothing is hard-coded — and creates or updates the admin account on every start.
 - The **administrator** can manage all user accounts from the **Admin panel** → **Manage users**.
 - The user management module provides:
   - A **table view** of all registered users (ID, name, email, role).

@@ -80,10 +80,17 @@ def init_database():
         CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, password TEXT NOT NULL, is_admin INTEGER NOT NULL DEFAULT 0);
         CREATE TABLE IF NOT EXISTS materials (id INTEGER PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL, category TEXT NOT NULL, drive_url TEXT NOT NULL, icon TEXT NOT NULL DEFAULT '📚');
         """)
-    email = ADMIN_CONTACT_EMAIL
-    password = os.environ.get("ADMIN_PASSWORD", "@Sanket918616")
-    if not db.execute("SELECT id FROM users WHERE email=?", (email,)).fetchone():
-        db.execute("INSERT INTO users (name,email,password,is_admin) VALUES (?,?,?,?)", ("Administrator", email, generate_password_hash(password), True))
+    admin_email = ADMIN_CONTACT_EMAIL
+    admin_password = os.environ.get("ADMIN_PASSWORD", "").strip()
+    if not admin_email or not admin_password:
+        app.logger.warning("ADMIN_EMAIL / ADMIN_PASSWORD are not configured in the environment: the admin account was not created or updated. Add both to your .env file.")
+    else:
+        admin = db.execute("SELECT id FROM users WHERE email=?", (admin_email,)).fetchone()
+        if admin:
+            db.execute("UPDATE users SET name=?, password=?, is_admin=? WHERE id=?", ("Administrator", generate_password_hash(admin_password), True, admin["id"]))
+        else:
+            db.execute("INSERT INTO users (name,email,password,is_admin) VALUES (?,?,?,?)", ("Administrator", admin_email, generate_password_hash(admin_password), True))
+        db.commit()
     if not db.execute("SELECT id FROM materials").fetchone():
         db.executemany("INSERT INTO materials (title,description,category,drive_url,icon) VALUES (?,?,?,?,?)", [
           ("Class Notes", "Chapter-wise notes and explanations.", "Notes", DEFAULT_DRIVE_URL, "📝"),
@@ -193,6 +200,10 @@ def login():
             return redirect(url_for("admin_dashboard") if user["is_admin"] else url_for("home"))
         flash("Incorrect email or password.", "error")
     return render_template("auth.html", mode="login")
+
+@app.route("/forgot-password")
+def forgot_password():
+    return render_template("forgot_password.html")
 
 @app.route("/logout")
 def logout():
