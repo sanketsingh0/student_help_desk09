@@ -5,7 +5,7 @@
   <div class="admin-heading">
     <p class="eyebrow">TEACHER ACCESS</p>
     <h1>Students' work</h1>
-    <p>See every task students have logged, mark it completed or not, and set how much (%) of it is done.</p>
+    <p>See every task students have logged, open the work they submitted by link, mark it completed or not, and set how much (%) of it is done.</p>
   </div>
 
   <div class="stat-cards">
@@ -47,6 +47,9 @@
               <small>{{ task.category }}{% if task.subject_name %} · {{ task.subject_name }}{% endif %}</small>
               <small>{{ task.description }}</small>
               {% if task.work_details %}<details class="task-works"><summary>Student's work so far</summary><p>{{ task.work_details }}</p></details>{% endif %}
+              <div class="submission-badge">
+                {% if task.work_link %}<a class="work-link" href="{{ task.work_link }}" target="_blank" rel="noopener">📎 View submitted work →</a>{% else %}<span class="muted-text">No link submitted</span>{% endif %}
+              </div>
             </td>
             <td>{% if task.status == 'completed' %}<span class="role-badge completed">Completed</span>{% elif task.status == 'in_progress' %}<span class="role-badge in_progress">In progress</span>{% else %}<span class="role-badge pending">Pending</span>{% endif %}</td>
             <td><span class="progress-track"><span class="progress-fill" style="width:{{ task.progress }}%"></span></span><span class="progress-num">{{ task.progress }}%</span></td>

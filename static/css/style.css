@@ -46,3 +46,13 @@
 .teacher-form .save-btn:hover { background:#384b43; }
 @media (max-width:900px) { .stat-cards { grid-template-columns:repeat(2,1fr); } }
 @media (max-width:760px) { .search-form select { width:100%; } }
+.work-link { display:inline-block; margin-top:8px; padding:6px 11px; border-radius:7px; background:#eef5d3; color:#557016; font-size:.78rem; font-weight:700; }
+.work-link:hover { background:#e2eec0; }
+.muted-text { color:var(--muted); font-size:.78rem; }
+.submission-badge { margin-top:10px; }
+.submission-badge .work-link { margin-top:0; }
+.submit-link-box summary { font-size:.74rem; font-weight:600; }
+.submit-link-form { display:flex; gap:6px; margin-top:6px; }
+.submit-link-form input { flex:1; min-width:150px; padding:6px 8px; border:1px solid var(--line); border-radius:6px; font:inherit; font-size:.78rem; }
+.submit-link-form button { padding:6px 12px; border:0; border-radius:6px; background:var(--ink); color:#fff; font:inherit; font-size:.74rem; font-weight:700; cursor:pointer; }
+.submit-link-form button:hover { background:#384b43; }

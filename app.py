@@ -95,6 +95,7 @@ def init_database():
             title TEXT NOT NULL,
             description TEXT NOT NULL DEFAULT '',
             work_details TEXT NOT NULL DEFAULT '',
+            work_link TEXT NOT NULL DEFAULT '',
             status TEXT NOT NULL DEFAULT 'pending',
             progress INTEGER NOT NULL DEFAULT 0,
             teacher_remark TEXT NOT NULL DEFAULT '',
@@ -104,19 +105,23 @@ def init_database():
         db.executescript("""
         CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, password TEXT NOT NULL, is_admin INTEGER NOT NULL DEFAULT 0, is_teacher INTEGER NOT NULL DEFAULT 0, student_id TEXT);
         CREATE TABLE IF NOT EXISTS materials (id INTEGER PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL, category TEXT NOT NULL, drive_url TEXT NOT NULL, icon TEXT NOT NULL DEFAULT '📚');
-        CREATE TABLE IF NOT EXISTS student_tasks (id INTEGER PRIMARY KEY, student_id INTEGER NOT NULL, subject_code TEXT NOT NULL, subject_name TEXT NOT NULL DEFAULT '', category TEXT NOT NULL DEFAULT 'Assignment', title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', work_details TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'pending', progress INTEGER NOT NULL DEFAULT 0, teacher_remark TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT '');
+        CREATE TABLE IF NOT EXISTS student_tasks (id INTEGER PRIMARY KEY, student_id INTEGER NOT NULL, subject_code TEXT NOT NULL, subject_name TEXT NOT NULL DEFAULT '', category TEXT NOT NULL DEFAULT 'Assignment', title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', work_details TEXT NOT NULL DEFAULT '', work_link TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'pending', progress INTEGER NOT NULL DEFAULT 0, teacher_remark TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT '');
         """)
     # Migrate databases created before the teacher/student-id columns existed.
     try:
         if DATABASE_URL:
             db.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_teacher BOOLEAN NOT NULL DEFAULT FALSE")
             db.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS student_id TEXT")
+            db.execute("ALTER TABLE student_tasks ADD COLUMN IF NOT EXISTS work_link TEXT NOT NULL DEFAULT ''")
         else:
-            columns = [row["name"] for row in db.execute("PRAGMA table_info(users)").fetchall()]
-            if "is_teacher" not in columns:
+            user_columns = [row["name"] for row in db.execute("PRAGMA table_info(users)").fetchall()]
+            if "is_teacher" not in user_columns:
                 db.execute("ALTER TABLE users ADD COLUMN is_teacher INTEGER NOT NULL DEFAULT 0")
-            if "student_id" not in columns:
+            if "student_id" not in user_columns:
                 db.execute("ALTER TABLE users ADD COLUMN student_id TEXT")
+            task_columns = [row["name"] for row in db.execute("PRAGMA table_info(student_tasks)").fetchall()]
+            if "work_link" not in task_columns:
+                db.execute("ALTER TABLE student_tasks ADD COLUMN work_link TEXT NOT NULL DEFAULT ''")
         db.commit()
     except Exception as error:
         app.logger.warning("Optional column migration skipped: %s", error)
@@ -400,13 +405,14 @@ def add_task():
     title = request.form.get("title", "").strip()
     description = request.form.get("description", "").strip()
     work_details = request.form.get("work_details", "").strip()
+    work_link = request.form.get("work_link", "").strip()
     if not subject_code or not category or not title:
         flash("Subject code, category, and task title are required.", "error")
     else:
         now = _now()
         db = get_db()
-        db.execute("INSERT INTO student_tasks (student_id, subject_code, subject_name, category, title, description, work_details, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
-            (session["user_id"], subject_code, subject_name, category, title, description, work_details, now, now))
+        db.execute("INSERT INTO student_tasks (student_id, subject_code, subject_name, category, title, description, work_details, work_link, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (session["user_id"], subject_code, subject_name, category, title, description, work_details, work_link, now, now))
         db.commit()
         flash("Task added to your panel.", "success")
     return redirect(url_for("student_tasks"))
@@ -426,17 +432,37 @@ def edit_task(task_id):
         title = request.form.get("title", "").strip()
         description = request.form.get("description", "").strip()
         work_details = request.form.get("work_details", "").strip()
+        work_link = request.form.get("work_link", "").strip()
         if not subject_code or not category or not title:
             flash("Subject code, category, and task title are required.", "error")
         else:
-            db.execute("UPDATE student_tasks SET subject_code=?, subject_name=?, category=?, title=?, description=?, work_details=?, updated_at=? WHERE id=? AND student_id=?",
-                (subject_code, subject_name, category, title, description, work_details, _now(), task_id, session["user_id"]))
+            db.execute("UPDATE student_tasks SET subject_code=?, subject_name=?, category=?, title=?, description=?, work_details=?, work_link=?, updated_at=? WHERE id=? AND student_id=?",
+                (subject_code, subject_name, category, title, description, work_details, work_link, _now(), task_id, session["user_id"]))
             db.commit()
             flash("Task updated.", "success")
             return redirect(url_for("student_tasks"))
     tasks = db.execute("SELECT * FROM student_tasks WHERE student_id=? ORDER BY id DESC", (session["user_id"],)).fetchall()
     codes = db.execute("SELECT DISTINCT subject_code FROM student_tasks WHERE student_id=? ORDER BY subject_code", (session["user_id"],)).fetchall()
     return render_template("student_tasks.html", tasks=tasks, edit_task=task, subject_code="", subject_codes=codes)
+
+@app.route("/tasks/<int:task_id>/submit-link", methods=["POST"])
+@login_required
+def submit_task_link(task_id):
+    db = get_db()
+    task = db.execute("SELECT id FROM student_tasks WHERE id=? AND student_id=?", (task_id, session["user_id"])).fetchone()
+    if not task:
+        flash("Task not found.", "error")
+        return redirect(url_for("student_tasks"))
+    work_link = request.form.get("work_link", "").strip()
+    if not work_link:
+        flash("Please paste a link to your submitted work.", "error")
+    else:
+        if not work_link.startswith(("http://", "https://")):
+            work_link = "https://" + work_link
+        db.execute("UPDATE student_tasks SET work_link=?, updated_at=? WHERE id=? AND student_id=?", (work_link, _now(), task_id, session["user_id"]))
+        db.commit()
+        flash("Submission link saved. Teachers can now open it.", "success")
+    return redirect(url_for("student_tasks"))
 
 @app.route("/tasks/<int:task_id>/delete", methods=["POST"])
 @login_required

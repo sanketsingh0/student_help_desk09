@@ -55,6 +55,7 @@ Students can log the college assignments/projects they are working on, and teach
 
 - **Students** — after logging in, click **My tasks**:
   - Add tasks with a **subject code** (e.g. `CS301`), subject name, **category** (Assignment / Project / Lab work / Practical / Quiz, etc.), a title, a description, and work-done notes.
+  - **Submit work by link** — just like admins add material links, students paste a Google Drive link to their assignment/project (from the task's *Submit link* box or the add/edit form). The submitted link appears in the teacher panel for review.
   - **Filter** their own tasks by subject code.
   - See the current status badge and a **progress % bar** set by the teacher.
 - **Teachers** — the administrator marks an account as a **Teacher** from **Admin panel → Manage users → Edit → Teacher**. Teachers then see the **Teacher panel**:
