@@ -252,7 +252,7 @@ def edit_user(user_id):
     if request.method == "POST":
         name = request.form.get("name", "").strip()
         email = request.form.get("email", "").strip().lower()
-        is_admin = 1 if request.form.get("is_admin") else 0
+        is_admin = bool(request.form.get("is_admin"))
         new_password = request.form.get("new_password", "")
         if not name or not email:
             flash("Name and email are required.", "error")
