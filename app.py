@@ -84,7 +84,11 @@ def init_database():
             password TEXT NOT NULL,
             is_admin BOOLEAN NOT NULL DEFAULT FALSE,
             is_teacher BOOLEAN NOT NULL DEFAULT FALSE,
-            student_id TEXT)""")
+            student_id TEXT,
+            course TEXT,
+            section TEXT,
+            branch TEXT,
+            year TEXT)""")
         db.execute("CREATE TABLE IF NOT EXISTS materials (id SERIAL PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL, category TEXT NOT NULL, drive_url TEXT NOT NULL, icon TEXT NOT NULL DEFAULT '📚')")
         db.execute("""CREATE TABLE IF NOT EXISTS student_tasks (
             id SERIAL PRIMARY KEY,
@@ -101,30 +105,68 @@ def init_database():
             teacher_remark TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL DEFAULT '',
             updated_at TEXT NOT NULL DEFAULT '',
-            submitted_at TEXT NOT NULL DEFAULT '')""")
+            submitted_at TEXT NOT NULL DEFAULT '',
+            student_name TEXT NOT NULL DEFAULT '',
+            student_roll TEXT NOT NULL DEFAULT '')""")
     else:
         db.executescript("""
-        CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, password TEXT NOT NULL, is_admin INTEGER NOT NULL DEFAULT 0, is_teacher INTEGER NOT NULL DEFAULT 0, student_id TEXT);
+        CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, password TEXT NOT NULL, is_admin INTEGER NOT NULL DEFAULT 0, is_teacher INTEGER NOT NULL DEFAULT 0, student_id TEXT, course TEXT, section TEXT, branch TEXT, year TEXT);
         CREATE TABLE IF NOT EXISTS materials (id INTEGER PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL, category TEXT NOT NULL, drive_url TEXT NOT NULL, icon TEXT NOT NULL DEFAULT '📚');
-        CREATE TABLE IF NOT EXISTS student_tasks (id INTEGER PRIMARY KEY, student_id INTEGER NOT NULL, subject_code TEXT NOT NULL, subject_name TEXT NOT NULL DEFAULT '', category TEXT NOT NULL DEFAULT 'Assignment', title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', work_details TEXT NOT NULL DEFAULT '', work_link TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'pending', progress INTEGER NOT NULL DEFAULT 0, teacher_remark TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT '', submitted_at TEXT NOT NULL DEFAULT '');
+        CREATE TABLE IF NOT EXISTS student_tasks (id INTEGER PRIMARY KEY, student_id INTEGER NOT NULL, subject_code TEXT NOT NULL, subject_name TEXT NOT NULL DEFAULT '', category TEXT NOT NULL DEFAULT 'Assignment', title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', work_details TEXT NOT NULL DEFAULT '', work_link TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'pending', progress INTEGER NOT NULL DEFAULT 0, teacher_remark TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT '', submitted_at TEXT NOT NULL DEFAULT '', student_name TEXT NOT NULL DEFAULT '', student_roll TEXT NOT NULL DEFAULT '');
+        CREATE TABLE IF NOT EXISTS report_work (id INTEGER PRIMARY KEY, task_id INTEGER NOT NULL UNIQUE, student_id INTEGER NOT NULL, student_name TEXT NOT NULL DEFAULT '', student_roll TEXT NOT NULL DEFAULT '', task_title TEXT NOT NULL DEFAULT '', subject_code TEXT NOT NULL DEFAULT '', teacher_remark TEXT NOT NULL DEFAULT '', submitted_at TEXT NOT NULL DEFAULT '', completed_at TEXT NOT NULL DEFAULT '');
         """)
-    # Migrate databases created before the teacher/student-id columns existed.
+    # Migrate databases created before the teacher/student-id/profile columns existed.
     try:
         if DATABASE_URL:
             db.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_teacher BOOLEAN NOT NULL DEFAULT FALSE")
             db.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS student_id TEXT")
+            db.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS course TEXT")
+            db.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS section TEXT")
+            db.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS branch TEXT")
+            db.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS year TEXT")
             db.execute("ALTER TABLE student_tasks ADD COLUMN IF NOT EXISTS submitted_at TEXT NOT NULL DEFAULT ''")
+            db.execute("ALTER TABLE student_tasks ADD COLUMN IF NOT EXISTS student_name TEXT NOT NULL DEFAULT ''")
+            db.execute("ALTER TABLE student_tasks ADD COLUMN IF NOT EXISTS student_roll TEXT NOT NULL DEFAULT ''")
+            db.execute("""CREATE TABLE IF NOT EXISTS report_work (
+                id SERIAL PRIMARY KEY,
+                task_id INTEGER NOT NULL UNIQUE,
+                student_id INTEGER NOT NULL,
+                student_name TEXT NOT NULL DEFAULT '',
+                student_roll TEXT NOT NULL DEFAULT '',
+                task_title TEXT NOT NULL DEFAULT '',
+                subject_code TEXT NOT NULL DEFAULT '',
+                teacher_remark TEXT NOT NULL DEFAULT '',
+                submitted_at TEXT NOT NULL DEFAULT '',
+                completed_at TEXT NOT NULL DEFAULT '')""")
         else:
             user_columns = [row["name"] for row in db.execute("PRAGMA table_info(users)").fetchall()]
-            if "is_teacher" not in user_columns:
-                db.execute("ALTER TABLE users ADD COLUMN is_teacher INTEGER NOT NULL DEFAULT 0")
-            if "student_id" not in user_columns:
-                db.execute("ALTER TABLE users ADD COLUMN student_id TEXT")
+            for column in ("is_teacher", "student_id", "course", "section", "branch", "year"):
+                if column not in user_columns:
+                    default = " INTEGER NOT NULL DEFAULT 0" if column == "is_teacher" else " TEXT"
+                    db.execute(f"ALTER TABLE users ADD COLUMN {column}{default}")
             task_columns = [row["name"] for row in db.execute("PRAGMA table_info(student_tasks)").fetchall()]
-            if "work_link" not in task_columns:
-                db.execute("ALTER TABLE student_tasks ADD COLUMN work_link TEXT NOT NULL DEFAULT ''")
-            if "submitted_at" not in task_columns:
-                db.execute("ALTER TABLE student_tasks ADD COLUMN submitted_at TEXT NOT NULL DEFAULT ''")
+            for column in ("work_link", "submitted_at", "student_name", "student_roll"):
+                if column not in task_columns:
+                    db.execute(f"ALTER TABLE student_tasks ADD COLUMN {column} TEXT NOT NULL DEFAULT ''")
+            db.execute("""CREATE TABLE IF NOT EXISTS report_work (
+                id INTEGER PRIMARY KEY,
+                task_id INTEGER NOT NULL UNIQUE,
+                student_id INTEGER NOT NULL,
+                student_name TEXT NOT NULL DEFAULT '',
+                student_roll TEXT NOT NULL DEFAULT '',
+                task_title TEXT NOT NULL DEFAULT '',
+                subject_code TEXT NOT NULL DEFAULT '',
+                teacher_remark TEXT NOT NULL DEFAULT '',
+                submitted_at TEXT NOT NULL DEFAULT '',
+                completed_at TEXT NOT NULL DEFAULT '')""")
+        # Snapshot each student's current name and roll number onto their task rows.
+        db.execute("UPDATE student_tasks SET student_name=(SELECT name FROM users WHERE users.id=student_tasks.student_id), student_roll=(SELECT student_id FROM users WHERE users.id=student_tasks.student_id)")
+        # Build the completion work report from tasks that are already marked complete.
+        db.execute("""INSERT INTO report_work (task_id, student_id, student_name, student_roll, task_title, subject_code, teacher_remark, submitted_at, completed_at)
+            SELECT id, student_id, student_name, student_roll, title, subject_code, teacher_remark,
+                   CASE WHEN submitted_at <> '' THEN submitted_at ELSE updated_at END, updated_at
+            FROM student_tasks WHERE status='completed'
+            ON CONFLICT(task_id) DO NOTHING""")
         db.commit()
     except Exception as error:
         app.logger.warning("Optional column migration skipped: %s", error)
@@ -309,13 +351,14 @@ def admin_users():
 @admin_required
 def edit_user(user_id):
     db = get_db()
-    user = db.execute("SELECT id, name, email, is_admin, is_teacher FROM users WHERE id=?", (user_id,)).fetchone()
+    user = db.execute("SELECT id, name, email, student_id, is_admin, is_teacher FROM users WHERE id=?", (user_id,)).fetchone()
     if not user:
         flash("User not found.", "error")
         return redirect(url_for("admin_users"))
     if request.method == "POST":
         name = request.form.get("name", "").strip()
         email = request.form.get("email", "").strip().lower()
+        student_id = request.form.get("student_id", "").strip().upper()
         is_admin = bool(request.form.get("is_admin"))
         is_teacher = bool(request.form.get("is_teacher"))
         new_password = request.form.get("new_password", "")
@@ -323,7 +366,9 @@ def edit_user(user_id):
             flash("Name and email are required.", "error")
         else:
             try:
-                db.execute("UPDATE users SET name=?, email=?, is_admin=?, is_teacher=? WHERE id=?", (name, email, is_admin, is_teacher, user_id))
+                db.execute("UPDATE users SET name=?, email=?, student_id=?, is_admin=?, is_teacher=? WHERE id=?", (name, email, student_id or None, is_admin, is_teacher, user_id))
+                db.execute("UPDATE student_tasks SET student_name=?, student_roll=? WHERE student_id=?", (name, student_id, user_id))
+                db.execute("UPDATE report_work SET student_name=?, student_roll=? WHERE student_id=?", (name, student_id, user_id))
                 if new_password:
                     if len(new_password) < 8:
                         flash("Password must be at least 8 characters.", "error")
@@ -397,7 +442,9 @@ def student_tasks():
     else:
         tasks = db.execute("SELECT * FROM student_tasks WHERE student_id=? ORDER BY id DESC", (session["user_id"],)).fetchall()
     codes = db.execute("SELECT DISTINCT subject_code FROM student_tasks WHERE student_id=? ORDER BY subject_code", (session["user_id"],)).fetchall()
-    return render_template("student_tasks.html", tasks=tasks, edit_task=None, subject_code=subject_code, subject_codes=codes)
+    profile = db.execute("SELECT id, name, email, student_id, course, section, branch, year FROM users WHERE id=?", (session["user_id"],)).fetchone()
+    return render_template("student_tasks.html", tasks=tasks, edit_task=None, subject_code=subject_code, subject_codes=codes,
+        profile=profile, edit_profile=bool(request.args.get("edit_profile")))
 
 @app.route("/tasks/add", methods=["POST"])
 @login_required
@@ -414,8 +461,11 @@ def add_task():
     else:
         now = _now()
         db = get_db()
-        db.execute("INSERT INTO student_tasks (student_id, subject_code, subject_name, category, title, description, work_details, work_link, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
-            (session["user_id"], subject_code, subject_name, category, title or "Untitled task", description, work_details, work_link, now, now))
+        user = db.execute("SELECT name, student_id FROM users WHERE id=?", (session["user_id"],)).fetchone()
+        student_name = user["name"] if user else ""
+        student_roll = (user["student_id"] or "") if user else ""
+        db.execute("INSERT INTO student_tasks (student_id, subject_code, subject_name, category, title, description, work_details, work_link, created_at, updated_at, student_name, student_roll) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (session["user_id"], subject_code, subject_name, category, title or "Untitled task", description, work_details, work_link, now, now, student_name, student_roll))
         db.commit()
         flash("Task added to your panel.", "success")
     return redirect(url_for("student_tasks"))
@@ -439,14 +489,19 @@ def edit_task(task_id):
         if not subject_code or not category:
             flash("Subject code and category are required.", "error")
         else:
-            db.execute("UPDATE student_tasks SET subject_code=?, subject_name=?, category=?, title=?, description=?, work_details=?, work_link=?, updated_at=? WHERE id=? AND student_id=?",
-                (subject_code, subject_name, category, title or "Untitled task", description, work_details, work_link, _now(), task_id, session["user_id"]))
+            user = db.execute("SELECT name, student_id FROM users WHERE id=?", (session["user_id"],)).fetchone()
+            student_name = user["name"] if user else ""
+            student_roll = (user["student_id"] or "") if user else ""
+            db.execute("UPDATE student_tasks SET subject_code=?, subject_name=?, category=?, title=?, description=?, work_details=?, work_link=?, student_name=?, student_roll=?, updated_at=? WHERE id=? AND student_id=?",
+                (subject_code, subject_name, category, title or "Untitled task", description, work_details, work_link, student_name, student_roll, _now(), task_id, session["user_id"]))
+            db.execute("UPDATE report_work SET task_title=?, subject_code=? WHERE task_id=?", (title or "Untitled task", subject_code, task_id))
             db.commit()
             flash("Task updated.", "success")
             return redirect(url_for("student_tasks"))
     tasks = db.execute("SELECT * FROM student_tasks WHERE student_id=? ORDER BY id DESC", (session["user_id"],)).fetchall()
     codes = db.execute("SELECT DISTINCT subject_code FROM student_tasks WHERE student_id=? ORDER BY subject_code", (session["user_id"],)).fetchall()
-    return render_template("student_tasks.html", tasks=tasks, edit_task=task, subject_code="", subject_codes=codes)
+    profile = db.execute("SELECT id, name, email, student_id, course, section, branch, year FROM users WHERE id=?", (session["user_id"],)).fetchone()
+    return render_template("student_tasks.html", tasks=tasks, edit_task=task, subject_code="", subject_codes=codes, profile=profile, edit_profile=False)
 
 @app.route("/tasks/<int:task_id>/submit-link", methods=["POST"])
 @login_required
@@ -490,8 +545,36 @@ def submit_task_link(task_id):
 def delete_task(task_id):
     db = get_db()
     db.execute("DELETE FROM student_tasks WHERE id=? AND student_id=?", (task_id, session["user_id"]))
+    db.execute("DELETE FROM report_work WHERE task_id=?", (task_id,))
     db.commit()
     flash("Task removed.", "success")
+    return redirect(url_for("student_tasks"))
+
+# ---------------------------------------------------------------- student profile
+@app.route("/profile", methods=["POST"])
+@login_required
+def profile_update():
+    name = request.form.get("name", "").strip()
+    roll_number = request.form.get("roll_number", "").strip().upper()
+    course = request.form.get("course", "").strip()
+    section = request.form.get("section", "").strip()
+    branch = request.form.get("branch", "").strip()
+    year = request.form.get("year", "").strip()
+    if not name:
+        flash("Full name is required.", "error")
+    else:
+        db = get_db()
+        db.execute("UPDATE users SET name=?, student_id=?, course=?, section=?, branch=?, year=? WHERE id=?",
+            (name, roll_number or None, course, section, branch, year, session["user_id"]))
+        # Every task this student logs carries their name and roll number.
+        db.execute("UPDATE student_tasks SET student_name=?, student_roll=? WHERE student_id=?",
+            (name, roll_number, session["user_id"]))
+        db.execute("UPDATE report_work SET student_name=?, student_roll=? WHERE student_id=?",
+            (name, roll_number, session["user_id"]))
+        db.commit()
+        session["user_name"] = name
+        session["student_id"] = roll_number
+        flash("Profile updated. Your name and roll number are attached to your tasks.", "success")
     return redirect(url_for("student_tasks"))
 
 # ---------------------------------------------------------------- teacher panel
@@ -530,7 +613,8 @@ def teacher_panel():
 @teacher_required
 def teacher_update_task(task_id):
     db = get_db()
-    if not db.execute("SELECT id FROM student_tasks WHERE id=?", (task_id,)).fetchone():
+    task = db.execute("SELECT * FROM student_tasks WHERE id=?", (task_id,)).fetchone()
+    if not task:
         flash("Task not found.", "error")
         return redirect(url_for("teacher_panel"))
     status = request.form.get("status", "pending").strip()
@@ -546,11 +630,41 @@ def teacher_update_task(task_id):
     remark = request.form.get("remark", "").strip()
     now = _now()
     db.execute("UPDATE student_tasks SET status=?, progress=?, teacher_remark=?, updated_at=? WHERE id=?", (status, progress, remark, now, task_id))
+    # Keep the completion work report in sync: one report row per completed task.
+    db.execute("DELETE FROM report_work WHERE task_id=?", (task_id,))
+    if status == "completed":
+        submitted_date = task["submitted_at"] or now
+        db.execute("INSERT INTO report_work (task_id, student_id, student_name, student_roll, task_title, subject_code, teacher_remark, submitted_at, completed_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            (task_id, task["student_id"], task["student_name"], task["student_roll"], task["title"], task["subject_code"], remark, submitted_date, now))
     db.commit()
     flash("Task status updated.", "success")
     return redirect(url_for("teacher_panel",
         subject_code=request.form.get("subject_code", ""),
         student_id=request.form.get("student_id", "")))
+
+@app.route("/teacher/report")
+@login_required
+@teacher_required
+def work_report():
+    db = get_db()
+    subject_code = request.args.get("subject_code", "").strip().upper()
+    student_filter = request.args.get("student_id", "").strip()
+    query = "SELECT * FROM report_work"
+    where, params = [], []
+    if subject_code:
+        where.append("subject_code=?")
+        params.append(subject_code)
+    if student_filter.isdigit():
+        where.append("student_id=?")
+        params.append(int(student_filter))
+    if where:
+        query += " WHERE " + " AND ".join(where)
+    query += " ORDER BY completed_at DESC, id DESC"
+    rows = db.execute(query, params).fetchall()
+    students = db.execute("SELECT id, name, student_id FROM users WHERE NOT is_admin AND NOT is_teacher ORDER BY name").fetchall()
+    codes = db.execute("SELECT DISTINCT subject_code FROM report_work ORDER BY subject_code").fetchall()
+    return render_template("report_work.html", rows=rows, students=students, subject_codes=codes,
+        subject_code=subject_code, selected_student=student_filter, total=len(rows))
 
 with app.app_context(): init_database()
 if __name__ == "__main__": app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)), debug=True)

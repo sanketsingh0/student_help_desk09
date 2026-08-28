@@ -2,10 +2,20 @@
 {% block title %}My Tasks | StudySpace{% endblock %}
 {% block content %}
 <main class="admin-page">
-  <div class="admin-heading">
-    <p class="eyebrow">MY COLLEGE WORKSPACE</p>
-    <h1>My tasks</h1>
-    <p>Log your college assignments and projects{% if session.get('student_id') %} · Student ID: <b>{{ session.get('student_id') }}</b>{% endif %}. Teachers can review and grade this panel.</p>
+  <div class="admin-heading profile-heading">
+    <div>
+      <p class="eyebrow">MY COLLEGE WORKSPACE</p>
+      <h1>My tasks</h1>
+      <p>Log your college assignments and projects{% if session.get('student_id') %} · Student ID: <b>{{ session.get('student_id') }}</b>{% endif %}. Teachers can review and grade this panel.</p>
+    </div>
+    <button class="profile-module" type="button" onclick="openProfile();" aria-label="Edit your student profile">
+      <span class="profile-avatar">{{ (profile.name or session.get('user_name') or 'S')[0] | upper }}</span>
+      <span class="profile-meta">
+        <b>{{ profile.name or session.get('user_name') }}</b>
+        <small>{% if profile.student_id %}Roll: {{ profile.student_id }}{% else %}Tap to add your roll number{% endif %}</small>
+      </span>
+      <span class="profile-edit-icon">✎</span>
+    </button>
   </div>
   <div class="admin-layout">
     <form class="material-form" method="post" action="{% if edit_task %}{{ url_for('edit_task', task_id=edit_task.id) }}{% else %}{{ url_for('add_task') }}{% endif %}">
@@ -78,4 +88,38 @@
     </section>
   </div>
 </main>
+<div class="modal-overlay" id="profile-modal" onclick="closeProfile();">
+  <div class="modal-box profile-box" role="dialog" aria-modal="true" onclick="event.stopPropagation();">
+    <p class="eyebrow">STUDENT PROFILE</p>
+    <h2>Edit your details</h2>
+    <p>Your full name and roll number are shown to teachers and attached to every task you log here.</p>
+    <form class="profile-form" method="post" action="{{ url_for('profile_update') }}">
+      <label>Full name<input name="name" required value="{{ profile.name or '' }}"></label>
+      <label>Roll number<input name="roll_number" placeholder="e.g. 2024CS001" value="{{ profile.student_id or '' }}"></label>
+      <label>Email address <span class="profile-field-note">(used for login — cannot be changed here)</span><input type="email" value="{{ profile.email or '' }}" disabled></label>
+      <label>Course<input name="course" placeholder="e.g. B.Tech" value="{{ profile.course or '' }}"></label>
+      <div class="profile-grid2">
+        <label>Section<input name="section" placeholder="e.g. A" value="{{ profile.section or '' }}"></label>
+        <label>Branch<input name="branch" placeholder="e.g. Computer Science" value="{{ profile.branch or '' }}"></label>
+      </div>
+      <label>Year (of study)
+        <select name="year">
+          <option value="">Choose a year</option>
+          {% for year_opt in ['1st', '2nd', '3rd', '4th', '5th'] %}
+          <option value="{{ year_opt }}" {% if profile.year == year_opt %}selected{% endif %}>{{ year_opt }} year</option>
+          {% endfor %}
+          {% if profile.year and profile.year not in ['1st', '2nd', '3rd', '4th', '5th'] %}<option value="{{ profile.year }}" selected>{{ profile.year }}</option>{% endif %}
+        </select>
+      </label>
+      <button class="button" type="submit">Save profile</button>
+      <button class="profile-close" type="button" onclick="closeProfile();">Close</button>
+    </form>
+  </div>
+</div>
+<script>
+  function openProfile(){ document.getElementById('profile-modal').style.display='flex'; }
+  function closeProfile(){ document.getElementById('profile-modal').style.display='none'; }
+  {% if edit_profile %}document.addEventListener('DOMContentLoaded', openProfile);{% endif %}
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeProfile(); });
+</script>
 {% endblock %}

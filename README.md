@@ -58,11 +58,13 @@ Students can log the college assignments/projects they are working on, and teach
   - **Submit work by link** — just like admins add material links, students paste a Google Drive link to their assignment/project (from the task's *Submit link* box or the add/edit form). The submitted link appears in the teacher panel for review.
   - **Filter** their own tasks by subject code.
   - See the current status badge and a **progress % bar** set by the teacher.
+- **Student profile module** — on the top right of the **My tasks** dashboard every student has a profile card and can update their **full name, roll number, course, section, branch, and year** (the email shown there is their login id and cannot be changed). The name and roll number are copied into every task the student logs (`student_tasks.student_name` / `student_roll`), so teachers always see who submitted the work. The administrator can also set the roll number from **Admin panel → Manage users → Edit**.
 - **Teachers** — the administrator marks an account as a **Teacher** from **Admin panel → Manage users → Edit → Teacher**. Teachers then see the **Teacher panel**:
   - Every student's logged task with the student's name, email, and rolling ID.
   - **Filter by subject code** and/or by a specific student.
   - **Mark** each task as Pending / In progress / **Completed**, set a **0–100 % progress range**, and leave a private remark.
   - Stats cards (total, completed, in progress, average progress).
+- **Work completion report** (`teacher/report`, also linked in the nav + teacher panel) — a `report_work` table showing only completed work: **student name, roll number, task title, subject code, teacher remark, submission date**, and the date it was marked complete. Each completed task gets one row automatically when the teacher saves it, and the report can be filtered by subject code or student.
 
 Note: `ADMIN_PASSWORD` for Render as well as `DATABASE_URL` configure the deployed database — all task data is saved there.
 

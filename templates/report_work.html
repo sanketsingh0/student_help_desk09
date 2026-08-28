@@ -1,0 +1,54 @@
+{% extends 'base.html' %}
+{% block title %}Work Report | StudySpace{% endblock %}
+{% block content %}
+<main class="admin-page">
+  <div class="admin-heading">
+    <p class="eyebrow">COMPLETION REPORT</p>
+    <h1>Work report</h1>
+    <p>Completed tasks showing the student, roll number, task title, subject code, teacher remark, and the submission date.</p>
+    <a class="back-link" href="{{ url_for('teacher_panel') }}">← Back to Teacher panel</a>
+  </div>
+
+  <section class="user-table-section" style="margin-top:35px">
+    <div class="user-table-toolbar">
+      <form class="search-form" method="get" action="{{ url_for('work_report') }}">
+        <select name="subject_code">
+          <option value="">All subject codes</option>
+          {% for row in subject_codes %}
+          <option value="{{ row.subject_code }}" {% if row.subject_code == subject_code %}selected{% endif %}>{{ row.subject_code }}</option>
+          {% endfor %}
+        </select>
+        <select name="student_id">
+          <option value="">All students</option>
+          {% for student in students %}
+          <option value="{{ student.id }}" {% if student.id|string == selected_student %}selected{% endif %}>{{ student.name }}{% if student.student_id %} ({{ student.student_id }}){% endif %}</option>
+          {% endfor %}
+        </select>
+        <button type="submit">Filter</button>
+        {% if subject_code or selected_student %}<a class="clear-search" href="{{ url_for('work_report') }}">Clear</a>{% endif %}
+      </form>
+      <p class="user-count">{{ total }} completed task{{ 's' if total != 1 else '' }}</p>
+    </div>
+    <div class="table-wrap">
+      <table class="user-table wide">
+        <thead><tr><th>Student</th><th>Roll</th><th>Task</th><th>Subject code</th><th>Teacher remark</th><th>Submitted</th><th>Completed</th></tr></thead>
+        <tbody>
+        {% for row in rows %}
+          <tr>
+            <td class="task-cell"><b>{{ row.student_name }}</b></td>
+            <td>{{ row.student_roll or '—' }}</td>
+            <td class="task-cell"><b>{{ row.task_title }}</b></td>
+            <td><span class="chip">{{ row.subject_code }}</span></td>
+            <td class="task-cell"><small>{{ row.teacher_remark or '—' }}</small></td>
+            <td class="task-cell"><small>{{ row.submitted_at or '—' }}</small></td>
+            <td class="task-cell"><small>{{ row.completed_at or '—' }}</small></td>
+          </tr>
+        {% else %}
+          <tr><td colspan="7" class="empty-row">No completed work yet. When a teacher marks a task complete with a remark, it is added here automatically.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</main>
+{% endblock %}
