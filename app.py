@@ -113,7 +113,7 @@ def init_database():
         CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, password TEXT NOT NULL, is_admin INTEGER NOT NULL DEFAULT 0, is_teacher INTEGER NOT NULL DEFAULT 0, student_id TEXT, course TEXT, section TEXT, branch TEXT, year TEXT);
         CREATE TABLE IF NOT EXISTS materials (id INTEGER PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL, category TEXT NOT NULL, drive_url TEXT NOT NULL, icon TEXT NOT NULL DEFAULT '📚');
         CREATE TABLE IF NOT EXISTS student_tasks (id INTEGER PRIMARY KEY, student_id INTEGER NOT NULL, subject_code TEXT NOT NULL, subject_name TEXT NOT NULL DEFAULT '', category TEXT NOT NULL DEFAULT 'Assignment', title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', work_details TEXT NOT NULL DEFAULT '', work_link TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'pending', progress INTEGER NOT NULL DEFAULT 0, teacher_remark TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT '', submitted_at TEXT NOT NULL DEFAULT '', student_name TEXT NOT NULL DEFAULT '', student_roll TEXT NOT NULL DEFAULT '');
-        CREATE TABLE IF NOT EXISTS report_work (id INTEGER PRIMARY KEY, task_id INTEGER NOT NULL UNIQUE, student_id INTEGER NOT NULL, student_name TEXT NOT NULL DEFAULT '', student_roll TEXT NOT NULL DEFAULT '', task_title TEXT NOT NULL DEFAULT '', subject_code TEXT NOT NULL DEFAULT '', teacher_remark TEXT NOT NULL DEFAULT '', submitted_at TEXT NOT NULL DEFAULT '', completed_at TEXT NOT NULL DEFAULT '');
+        CREATE TABLE IF NOT EXISTS report_work (student_name TEXT NOT NULL DEFAULT '', student_roll TEXT NOT NULL DEFAULT '', task_title TEXT NOT NULL DEFAULT '', subject_code TEXT NOT NULL DEFAULT '', teacher_remark TEXT NOT NULL DEFAULT '', submitted_at TEXT NOT NULL DEFAULT '');
         """)
     # Migrate databases created before the teacher/student-id/profile columns existed.
     try:
@@ -127,17 +127,26 @@ def init_database():
             db.execute("ALTER TABLE student_tasks ADD COLUMN IF NOT EXISTS submitted_at TEXT NOT NULL DEFAULT ''")
             db.execute("ALTER TABLE student_tasks ADD COLUMN IF NOT EXISTS student_name TEXT NOT NULL DEFAULT ''")
             db.execute("ALTER TABLE student_tasks ADD COLUMN IF NOT EXISTS student_roll TEXT NOT NULL DEFAULT ''")
-            db.execute("""CREATE TABLE IF NOT EXISTS report_work (
-                id SERIAL PRIMARY KEY,
-                task_id INTEGER NOT NULL UNIQUE,
-                student_id INTEGER NOT NULL,
-                student_name TEXT NOT NULL DEFAULT '',
-                student_roll TEXT NOT NULL DEFAULT '',
-                task_title TEXT NOT NULL DEFAULT '',
-                subject_code TEXT NOT NULL DEFAULT '',
-                teacher_remark TEXT NOT NULL DEFAULT '',
-                submitted_at TEXT NOT NULL DEFAULT '',
-                completed_at TEXT NOT NULL DEFAULT '')""")
+            report_columns = [row["column_name"] for row in db.execute(
+                "SELECT column_name FROM information_schema.columns WHERE table_name='report_work'").fetchall()]
+            if not report_columns:
+                db.execute("""CREATE TABLE report_work (
+                    student_name TEXT NOT NULL DEFAULT '',
+                    student_roll TEXT NOT NULL DEFAULT '',
+                    task_title TEXT NOT NULL DEFAULT '',
+                    subject_code TEXT NOT NULL DEFAULT '',
+                    teacher_remark TEXT NOT NULL DEFAULT '',
+                    submitted_at TEXT NOT NULL DEFAULT '')""")
+            elif "task_id" in report_columns:
+                # Old schema stored id / task_id / student_id / completed_at; rebuild it clean.
+                db.execute("DROP TABLE report_work")
+                db.execute("""CREATE TABLE report_work (
+                    student_name TEXT NOT NULL DEFAULT '',
+                    student_roll TEXT NOT NULL DEFAULT '',
+                    task_title TEXT NOT NULL DEFAULT '',
+                    subject_code TEXT NOT NULL DEFAULT '',
+                    teacher_remark TEXT NOT NULL DEFAULT '',
+                    submitted_at TEXT NOT NULL DEFAULT '')""")
         else:
             user_columns = [row["name"] for row in db.execute("PRAGMA table_info(users)").fetchall()]
             for column in ("is_teacher", "student_id", "course", "section", "branch", "year"):
@@ -148,26 +157,30 @@ def init_database():
             for column in ("work_link", "submitted_at", "student_name", "student_roll"):
                 if column not in task_columns:
                     db.execute(f"ALTER TABLE student_tasks ADD COLUMN {column} TEXT NOT NULL DEFAULT ''")
-            db.execute("""CREATE TABLE IF NOT EXISTS report_work (
-                id INTEGER PRIMARY KEY,
-                task_id INTEGER NOT NULL UNIQUE,
-                student_id INTEGER NOT NULL,
-                student_name TEXT NOT NULL DEFAULT '',
-                student_roll TEXT NOT NULL DEFAULT '',
-                task_title TEXT NOT NULL DEFAULT '',
-                subject_code TEXT NOT NULL DEFAULT '',
-                teacher_remark TEXT NOT NULL DEFAULT '',
-                submitted_at TEXT NOT NULL DEFAULT '',
-                completed_at TEXT NOT NULL DEFAULT '')""")
+            report_columns = [row["name"] for row in db.execute("PRAGMA table_info(report_work)").fetchall()]
+            if not report_columns:
+                db.execute("""CREATE TABLE report_work (
+                    student_name TEXT NOT NULL DEFAULT '',
+                    student_roll TEXT NOT NULL DEFAULT '',
+                    task_title TEXT NOT NULL DEFAULT '',
+                    subject_code TEXT NOT NULL DEFAULT '',
+                    teacher_remark TEXT NOT NULL DEFAULT '',
+                    submitted_at TEXT NOT NULL DEFAULT '')""")
+            elif "task_id" in report_columns:
+                # Old schema stored id / task_id / student_id / completed_at; rebuild it clean.
+                db.execute("DROP TABLE report_work")
+                db.execute("""CREATE TABLE report_work (
+                    student_name TEXT NOT NULL DEFAULT '',
+                    student_roll TEXT NOT NULL DEFAULT '',
+                    task_title TEXT NOT NULL DEFAULT '',
+                    subject_code TEXT NOT NULL DEFAULT '',
+                    teacher_remark TEXT NOT NULL DEFAULT '',
+                    submitted_at TEXT NOT NULL DEFAULT '')""")
         # Snapshot each student's current name and roll number onto their task rows.
         # COALESCE keeps 'NOT NULL' backends (PostgreSQL) happy when a student has no roll number.
         db.execute("UPDATE student_tasks SET student_name=COALESCE((SELECT name FROM users WHERE users.id=student_tasks.student_id), ''), student_roll=COALESCE((SELECT student_id FROM users WHERE users.id=student_tasks.student_id), '')")
-        # Build the completion work report from tasks that are already marked complete.
-        db.execute("""INSERT INTO report_work (task_id, student_id, student_name, student_roll, task_title, subject_code, teacher_remark, submitted_at, completed_at)
-            SELECT id, student_id, student_name, student_roll, title, subject_code, teacher_remark,
-                   CASE WHEN submitted_at <> '' THEN submitted_at ELSE updated_at END, updated_at
-            FROM student_tasks WHERE status='completed'
-            ON CONFLICT(task_id) DO NOTHING""")
+        # Build the completion work report (a clean snapshot of completed tasks).
+        rebuild_work_report()
         db.commit()
     except Exception as error:
         try:
@@ -193,6 +206,16 @@ def init_database():
           ("Assignments & Projects", "Guides and submission resources.", "Resources", DEFAULT_DRIVE_URL, "📁"),
           ("Video Lectures", "Recorded classes and learning videos.", "Videos", DEFAULT_DRIVE_URL, "🎥")])
     db.commit()
+
+def rebuild_work_report():
+    """Rebuild the completion work report as a clean snapshot of every completed task.
+    Stores only what the report shows: roll number, name, remark, submission date, title, subject code."""
+    db = get_db()
+    db.execute("DELETE FROM report_work")
+    db.execute("""INSERT INTO report_work (student_name, student_roll, task_title, subject_code, teacher_remark, submitted_at)
+        SELECT student_name, student_roll, title, subject_code, teacher_remark,
+               CASE WHEN submitted_at <> '' THEN submitted_at ELSE updated_at END
+        FROM student_tasks WHERE status='completed'""")
 
 def send_email(recipient, subject, body):
     """Send via Brevo's HTTP API when BREVO_API_KEY is set. Required on Render's
@@ -373,7 +396,7 @@ def edit_user(user_id):
             try:
                 db.execute("UPDATE users SET name=?, email=?, student_id=?, is_admin=?, is_teacher=? WHERE id=?", (name, email, student_id or None, is_admin, is_teacher, user_id))
                 db.execute("UPDATE student_tasks SET student_name=?, student_roll=? WHERE student_id=?", (name, student_id, user_id))
-                db.execute("UPDATE report_work SET student_name=?, student_roll=? WHERE student_id=?", (name, student_id, user_id))
+                rebuild_work_report()
                 if new_password:
                     if len(new_password) < 8:
                         flash("Password must be at least 8 characters.", "error")
@@ -499,7 +522,7 @@ def edit_task(task_id):
             student_roll = (user["student_id"] or "") if user else ""
             db.execute("UPDATE student_tasks SET subject_code=?, subject_name=?, category=?, title=?, description=?, work_details=?, work_link=?, student_name=?, student_roll=?, updated_at=? WHERE id=? AND student_id=?",
                 (subject_code, subject_name, category, title or "Untitled task", description, work_details, work_link, student_name, student_roll, _now(), task_id, session["user_id"]))
-            db.execute("UPDATE report_work SET task_title=?, subject_code=? WHERE task_id=?", (title or "Untitled task", subject_code, task_id))
+            rebuild_work_report()
             db.commit()
             flash("Task updated.", "success")
             return redirect(url_for("student_tasks"))
@@ -541,6 +564,7 @@ def submit_task_link(task_id):
             )
         )
 
+        rebuild_work_report()
         db.commit()
         flash("Submission link saved. Teachers can now open it.", "success")
     return redirect(url_for("student_tasks"))
@@ -550,7 +574,7 @@ def submit_task_link(task_id):
 def delete_task(task_id):
     db = get_db()
     db.execute("DELETE FROM student_tasks WHERE id=? AND student_id=?", (task_id, session["user_id"]))
-    db.execute("DELETE FROM report_work WHERE task_id=?", (task_id,))
+    rebuild_work_report()
     db.commit()
     flash("Task removed.", "success")
     return redirect(url_for("student_tasks"))
@@ -574,8 +598,7 @@ def profile_update():
         # Every task this student logs carries their name and roll number.
         db.execute("UPDATE student_tasks SET student_name=?, student_roll=? WHERE student_id=?",
             (name, roll_number, session["user_id"]))
-        db.execute("UPDATE report_work SET student_name=?, student_roll=? WHERE student_id=?",
-            (name, roll_number, session["user_id"]))
+        rebuild_work_report()
         db.commit()
         session["user_name"] = name
         session["student_id"] = roll_number
@@ -635,12 +658,8 @@ def teacher_update_task(task_id):
     remark = request.form.get("remark", "").strip()
     now = _now()
     db.execute("UPDATE student_tasks SET status=?, progress=?, teacher_remark=?, updated_at=? WHERE id=?", (status, progress, remark, now, task_id))
-    # Keep the completion work report in sync: one report row per completed task.
-    db.execute("DELETE FROM report_work WHERE task_id=?", (task_id,))
-    if status == "completed":
-        submitted_date = task["submitted_at"] or now
-        db.execute("INSERT INTO report_work (task_id, student_id, student_name, student_roll, task_title, subject_code, teacher_remark, submitted_at, completed_at) VALUES (?,?,?,?,?,?,?,?,?)",
-            (task_id, task["student_id"], task["student_name"], task["student_roll"], task["title"], task["subject_code"], remark, submitted_date, now))
+    # The completion report is rebuilt as a snapshot of every completed task.
+    rebuild_work_report()
     db.commit()
     flash("Task status updated.", "success")
     return redirect(url_for("teacher_panel",
@@ -654,18 +673,18 @@ def work_report():
     db = get_db()
     subject_code = request.args.get("subject_code", "").strip().upper()
     student_filter = request.args.get("student_id", "").strip()
-    # Only the fields that belong in the report are selected - no id, task_id or student_id.
-    query = ("SELECT student_name, student_roll, task_title, subject_code, teacher_remark, submitted_at, completed_at FROM report_work")
+    # The report table stores only: roll number, name, remark, submission date, title, subject code.
+    query = ("SELECT student_name, student_roll, task_title, subject_code, teacher_remark, submitted_at FROM report_work")
     where, params = [], []
     if subject_code:
         where.append("subject_code=?")
         params.append(subject_code)
     if student_filter.isdigit():
-        where.append("student_id=?")
+        where.append("student_name=(SELECT name FROM users WHERE id=?)")
         params.append(int(student_filter))
     if where:
         query += " WHERE " + " AND ".join(where)
-    query += " ORDER BY completed_at DESC"
+    query += " ORDER BY submitted_at DESC"
     rows = db.execute(query, params).fetchall()
     students = db.execute("SELECT id, name, student_id FROM users WHERE NOT is_admin AND NOT is_teacher ORDER BY name").fetchall()
     codes = db.execute("SELECT DISTINCT subject_code FROM report_work ORDER BY subject_code").fetchall()

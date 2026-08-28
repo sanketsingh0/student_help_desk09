@@ -1,6 +1,6 @@
 # StudySpace – Student Help Desk
 
-A Flask website where registered students access study resources through Google Drive links. Only the administrator can add, edit, or remove material links.
+A Flask website where registered students access study resources through Google Drive links. Only the administrator can add, edit, or remove material links. administrator have only access to change the user or any one change password 
 
 ## Add your Google Drive link
 
@@ -64,7 +64,7 @@ Students can log the college assignments/projects they are working on, and teach
   - **Filter by subject code** and/or by a specific student.
   - **Mark** each task as Pending / In progress / **Completed**, set a **0–100 % progress range**, and leave a private remark.
   - Stats cards (total, completed, in progress, average progress).
-- **Work completion report** (`teacher/report`, also linked in the nav + teacher panel) — a `report_work` table showing only completed work: **student name, roll number, task title, subject code, teacher remark, submission date**, and the date it was marked complete. Each completed task gets one row automatically when the teacher saves it, and the report can be filtered by subject code or student.
+- **Work completion report** (`teacher/report`, also linked in the nav + teacher panel) — a `report_work` table showing only completed work: **student name, roll number, task title, subject code, teacher remark, and submission date**. Each completed task appears automatically when the teacher saves it, and the report can be filtered by subject code or student.
 
 Note: `ADMIN_PASSWORD` for Render as well as `DATABASE_URL` configure the deployed database — all task data is saved there.
 

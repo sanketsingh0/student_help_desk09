@@ -31,7 +31,7 @@
     </div>
     <div class="table-wrap">
       <table class="user-table wide">
-        <thead><tr><th>Student</th><th>Roll</th><th>Task</th><th>Subject code</th><th>Teacher remark</th><th>Submitted</th><th>Completed</th></tr></thead>
+        <thead><tr><th>Student</th><th>Roll</th><th>Task</th><th>Subject code</th><th>Teacher remark</th><th>Submitted</th></tr></thead>
         <tbody>
         {% for row in rows %}
           <tr>
@@ -41,10 +41,9 @@
             <td><span class="chip">{{ row.subject_code }}</span></td>
             <td class="task-cell"><small>{{ row.teacher_remark or '—' }}</small></td>
             <td class="task-cell"><small>{{ row.submitted_at or '—' }}</small></td>
-            <td class="task-cell"><small>{{ row.completed_at or '—' }}</small></td>
           </tr>
         {% else %}
-          <tr><td colspan="7" class="empty-row">No completed work yet. When a teacher marks a task complete with a remark, it is added here automatically.</td></tr>
+          <tr><td colspan="6" class="empty-row">No completed work yet. When a teacher marks a task complete with a remark, it is added here automatically.</td></tr>
         {% endfor %}
         </tbody>
       </table>
