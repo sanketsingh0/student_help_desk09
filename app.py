@@ -160,7 +160,8 @@ def init_database():
                 submitted_at TEXT NOT NULL DEFAULT '',
                 completed_at TEXT NOT NULL DEFAULT '')""")
         # Snapshot each student's current name and roll number onto their task rows.
-        db.execute("UPDATE student_tasks SET student_name=(SELECT name FROM users WHERE users.id=student_tasks.student_id), student_roll=(SELECT student_id FROM users WHERE users.id=student_tasks.student_id)")
+        # COALESCE keeps 'NOT NULL' backends (PostgreSQL) happy when a student has no roll number.
+        db.execute("UPDATE student_tasks SET student_name=COALESCE((SELECT name FROM users WHERE users.id=student_tasks.student_id), ''), student_roll=COALESCE((SELECT student_id FROM users WHERE users.id=student_tasks.student_id), '')")
         # Build the completion work report from tasks that are already marked complete.
         db.execute("""INSERT INTO report_work (task_id, student_id, student_name, student_roll, task_title, subject_code, teacher_remark, submitted_at, completed_at)
             SELECT id, student_id, student_name, student_roll, title, subject_code, teacher_remark,
@@ -169,6 +170,10 @@ def init_database():
             ON CONFLICT(task_id) DO NOTHING""")
         db.commit()
     except Exception as error:
+        try:
+            db.rollback()  # Clear any aborted transaction so later queries still work on PostgreSQL.
+        except Exception:
+            pass
         app.logger.warning("Optional column migration skipped: %s", error)
     admin_email = ADMIN_CONTACT_EMAIL
     admin_password = os.environ.get("ADMIN_PASSWORD", "").strip()
