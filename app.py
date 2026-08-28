@@ -100,19 +100,20 @@ def init_database():
             progress INTEGER NOT NULL DEFAULT 0,
             teacher_remark TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL DEFAULT '',
-            updated_at TEXT NOT NULL DEFAULT '')""")
+            updated_at TEXT NOT NULL DEFAULT '',
+            submitted_at TEXT NOT NULL DEFAULT '')""")
     else:
         db.executescript("""
         CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, password TEXT NOT NULL, is_admin INTEGER NOT NULL DEFAULT 0, is_teacher INTEGER NOT NULL DEFAULT 0, student_id TEXT);
         CREATE TABLE IF NOT EXISTS materials (id INTEGER PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL, category TEXT NOT NULL, drive_url TEXT NOT NULL, icon TEXT NOT NULL DEFAULT '📚');
-        CREATE TABLE IF NOT EXISTS student_tasks (id INTEGER PRIMARY KEY, student_id INTEGER NOT NULL, subject_code TEXT NOT NULL, subject_name TEXT NOT NULL DEFAULT '', category TEXT NOT NULL DEFAULT 'Assignment', title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', work_details TEXT NOT NULL DEFAULT '', work_link TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'pending', progress INTEGER NOT NULL DEFAULT 0, teacher_remark TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT '');
+        CREATE TABLE IF NOT EXISTS student_tasks (id INTEGER PRIMARY KEY, student_id INTEGER NOT NULL, subject_code TEXT NOT NULL, subject_name TEXT NOT NULL DEFAULT '', category TEXT NOT NULL DEFAULT 'Assignment', title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', work_details TEXT NOT NULL DEFAULT '', work_link TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'pending', progress INTEGER NOT NULL DEFAULT 0, teacher_remark TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT '', submitted_at TEXT NOT NULL DEFAULT '');
         """)
     # Migrate databases created before the teacher/student-id columns existed.
     try:
         if DATABASE_URL:
             db.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_teacher BOOLEAN NOT NULL DEFAULT FALSE")
             db.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS student_id TEXT")
-            db.execute("ALTER TABLE student_tasks ADD COLUMN IF NOT EXISTS work_link TEXT NOT NULL DEFAULT ''")
+            db.execute("ALTER TABLE student_tasks ADD COLUMN IF NOT EXISTS submitted_at TEXT NOT NULL DEFAULT ''")
         else:
             user_columns = [row["name"] for row in db.execute("PRAGMA table_info(users)").fetchall()]
             if "is_teacher" not in user_columns:
@@ -122,6 +123,8 @@ def init_database():
             task_columns = [row["name"] for row in db.execute("PRAGMA table_info(student_tasks)").fetchall()]
             if "work_link" not in task_columns:
                 db.execute("ALTER TABLE student_tasks ADD COLUMN work_link TEXT NOT NULL DEFAULT ''")
+            if "submitted_at" not in task_columns:
+                db.execute("ALTER TABLE student_tasks ADD COLUMN submitted_at TEXT NOT NULL DEFAULT ''")
         db.commit()
     except Exception as error:
         app.logger.warning("Optional column migration skipped: %s", error)
@@ -459,7 +462,25 @@ def submit_task_link(task_id):
     else:
         if not work_link.startswith(("http://", "https://")):
             work_link = "https://" + work_link
-        db.execute("UPDATE student_tasks SET work_link=?, updated_at=? WHERE id=? AND student_id=?", (work_link, _now(), task_id, session["user_id"]))
+        now = _now()
+
+        db.execute(
+            """
+            UPDATE student_tasks
+            SET work_link=?,
+                submitted_at=?,
+                updated_at=?
+            WHERE id=? AND student_id=?
+            """,
+            (
+                work_link,
+                now,
+                now,
+                task_id,
+                session["user_id"]
+            )
+        )
+
         db.commit()
         flash("Submission link saved. Teachers can now open it.", "success")
     return redirect(url_for("student_tasks"))
@@ -523,8 +544,8 @@ def teacher_update_task(task_id):
     if status == "completed":
         progress = 100
     remark = request.form.get("remark", "").strip()
-    db.execute("UPDATE student_tasks SET status=?, progress=?, teacher_remark=?, updated_at=? WHERE id=?",
-        (status, progress, remark, _now(), task_id))
+    now = _now()
+    db.execute("UPDATE student_tasks SET status=?, progress=?, teacher_remark=?, updated_at=? WHERE id=?", (status, progress, remark, now, task_id))
     db.commit()
     flash("Task status updated.", "success")
     return redirect(url_for("teacher_panel",
