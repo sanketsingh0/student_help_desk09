@@ -164,7 +164,7 @@ def init_database():
         db.execute("UPDATE student_tasks SET student_name=COALESCE((SELECT name FROM users WHERE users.id=student_tasks.student_id), ''), student_roll=COALESCE((SELECT student_id FROM users WHERE users.id=student_tasks.student_id), '')")
         # Build the completion work report from tasks that are already marked complete.
         db.execute("""INSERT INTO report_work (task_id, student_id, student_name, student_roll, task_title, subject_code, teacher_remark, submitted_at, completed_at)
-            SELECT id, student_id, student_name, student_roll, title, subject_code, teacher_remark,
+            SELECT student_name, student_roll, title, subject_code, teacher_remark,
                    CASE WHEN submitted_at <> '' THEN submitted_at ELSE updated_at END, updated_at
             FROM student_tasks WHERE status='completed'
             ON CONFLICT(task_id) DO NOTHING""")
