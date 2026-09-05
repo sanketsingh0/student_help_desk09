@@ -35,12 +35,12 @@
         <tbody>
         {% for row in rows %}
           <tr>
-            <td class="task-cell"><b>{{ row.student_name }}</b></td>
-            <td>{{ row.student_roll or '—' }}</td>
-            <td class="task-cell"><b>{{ row.task_title }}</b></td>
-            <td><span class="chip">{{ row.subject_code }}</span></td>
-            <td class="task-cell"><small>{{ row.teacher_remark or '—' }}</small></td>
-            <td class="task-cell"><small>{{ row.submitted_at or '—' }}</small></td>
+            <td class="task-cell" data-label="Student"><b>{{ row.student_name }}</b></td>
+            <td data-label="Roll">{{ row.student_roll or '—' }}</td>
+            <td class="task-cell" data-label="Task"><b>{{ row.task_title }}</b></td>
+            <td data-label="Subject code"><span class="chip">{{ row.subject_code }}</span></td>
+            <td class="task-cell" data-label="Teacher remark"><small>{{ row.teacher_remark or '—' }}</small></td>
+            <td class="task-cell" data-label="Submitted"><small>{{ row.submitted_at or '—' }}</small></td>
           </tr>
         {% else %}
           <tr><td colspan="6" class="empty-row">No completed work yet. When a teacher marks a task complete with a remark, it is added here automatically.</td></tr>

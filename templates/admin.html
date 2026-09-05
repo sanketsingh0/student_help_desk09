@@ -1,1 +1,50 @@
-{% extends 'base.html' %}{% block title %}Admin Panel | StudySpace{% endblock %}{% block content %}<main class="admin-page"><div class="admin-heading"><p class="eyebrow">ADMINISTRATOR ONLY</p><h1>Manage materials</h1><p>Add Google Drive links. Students can open them only after logging in.</p><a class="back-link" href="{{ url_for('admin_users') }}">Manage users →</a></div><section class="admin-layout"><form class="material-form" method="post" action="{% if edit_item %}{{ url_for('edit_material',material_id=edit_item.id) }}{% else %}{{ url_for('add_material') }}{% endif %}"><h2>{{ 'Edit material' if edit_item else 'Add a material' }}</h2><label>Title<input name="title" required value="{{ edit_item.title if edit_item else '' }}"></label><label>Description<textarea name="description" required>{{ edit_item.description if edit_item else '' }}</textarea></label><label>Category<input name="category" required value="{{ edit_item.category if edit_item else '' }}"></label><label>Google Drive link<input type="url" name="drive_url" required value="{{ edit_item.drive_url if edit_item else '' }}"></label><label>Icon (emoji)<input name="icon" required value="{{ edit_item.icon if edit_item else '📚' }}"></label><button class="button" type="submit">{{ 'Save changes' if edit_item else 'Add material' }}</button>{% if edit_item %}<a class="cancel-link" href="{{ url_for('admin_dashboard') }}">Cancel editing</a>{% endif %}</form><section class="material-list"><h2>Published materials</h2>{% for item in materials %}<article><span>{{ item.icon }}</span><div><h3>{{ item.title }}</h3><p>{{ item.category }} · {{ item.description }}</p></div><div class="admin-actions"><a href="{{ url_for('edit_material',material_id=item.id) }}">Edit</a><form method="post" action="{{ url_for('delete_material',material_id=item.id) }}"><button type="submit">Delete</button></form></div></article>{% else %}<p>No materials added yet.</p>{% endfor %}</section></section></main>{% endblock %}
+{% extends 'base.html' %}
+{% block title %}Admin Panel | StudySpace{% endblock %}
+{% block content %}
+<main class="admin-page">
+  <div class="admin-heading">
+    <p class="eyebrow">ADMINISTRATOR ONLY</p>
+    <h1>Manage materials</h1>
+    <p>Add Google Drive links. Students can open them only after logging in.</p>
+    <a class="back-link" href="{{ url_for('admin_users') }}">Manage users →</a>
+  </div>
+
+  <section class="admin-layout">
+    <form class="material-form" method="post" action="{% if edit_item %}{{ url_for('edit_material',material_id=edit_item.id) }}{% else %}{{ url_for('add_material') }}{% endif %}">
+      <h2>{{ 'Edit material' if edit_item else 'Add a material' }}</h2>
+      <label>Title<input name="title" required value="{{ edit_item.title if edit_item else '' }}"></label>
+      <label>Description
+        <textarea name="description" required>{{ edit_item.description if edit_item else '' }}</textarea>
+      </label>
+      <label>Category<input name="category" required value="{{ edit_item.category if edit_item else '' }}"></label>
+      <label>Google Drive link<input type="url" name="drive_url" required value="{{ edit_item.drive_url if edit_item else '' }}"></label>
+      <label>Icon (emoji)<input name="icon" required value="{{ edit_item.icon if edit_item else '📚' }}"></label>
+      <button class="button" type="submit">{{ 'Save changes' if edit_item else 'Add material' }}</button>
+      {% if edit_item %}
+      <a class="cancel-link" href="{{ url_for('admin_dashboard') }}">Cancel editing</a>
+      {% endif %}
+    </form>
+
+    <section class="material-list">
+      <h2>Published materials</h2>
+      {% for item in materials %}
+      <article>
+        <span>{{ item.icon }}</span>
+        <div>
+          <h3>{{ item.title }}</h3>
+          <p>{{ item.category }} · {{ item.description }}</p>
+        </div>
+        <div class="admin-actions">
+          <a href="{{ url_for('edit_material',material_id=item.id) }}">Edit</a>
+          <form method="post" action="{{ url_for('delete_material',material_id=item.id) }}">
+            <button type="submit">Delete</button>
+          </form>
+        </div>
+      </article>
+      {% else %}
+      <p>No materials added yet.</p>
+      {% endfor %}
+    </section>
+  </section>
+</main>
+{% endblock %}

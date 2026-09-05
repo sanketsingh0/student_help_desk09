@@ -57,12 +57,12 @@
           <tbody>
           {% for task in tasks %}
             <tr>
-              <td><span class="chip">{{ task.subject_code }}</span>{% if task.subject_name %}<small style="display:block;color:var(--muted);font-size:.75rem">{{ task.subject_name }}</small>{% endif %}</td>
-              <td class="task-cell"><b>{{ task.title }}</b><small>{{ task.description }}</small>
+              <td data-label="Subject"><span class="chip">{{ task.subject_code }}</span>{% if task.subject_name %}<small style="display:block;color:var(--muted);font-size:.75rem">{{ task.subject_name }}</small>{% endif %}</td>
+              <td class="task-cell" data-label="Task"><b>{{ task.title }}</b><small>{{ task.description }}</small>
                 {% if task.work_details %}<details class="task-works"><summary>My work so far</summary><p>{{ task.work_details }}</p></details>{% endif %}
                 {% if task.teacher_remark %}<details class="task-works" open><summary>Teacher remark</summary><p>{{ task.teacher_remark }}</p></details>{% endif %}
               </td>
-              <td>
+              <td data-label="Submission">
                 {% if task.work_link %}<a class="work-link" href="{{ task.work_link }}" target="_blank" rel="noopener">Open submitted work →</a>{% else %}<span class="muted-text">Not submitted</span>{% endif %}
                 <details class="task-works submit-link-box"><summary>{{ 'Update link' if task.work_link else 'Submit link' }}</summary>
                   <form class="submit-link-form" method="post" action="{{ url_for('submit_task_link', task_id=task.id) }}">
@@ -71,10 +71,10 @@
                   </form>
                 </details>
               </td>
-              <td>{{ task.category }}</td>
-              <td>{% if task.status == 'completed' %}<span class="role-badge completed">Completed</span>{% elif task.status == 'in_progress' %}<span class="role-badge in_progress">In progress</span>{% else %}<span class="role-badge pending">Pending</span>{% endif %}</td>
-              <td><span class="progress-track"><span class="progress-fill" style="width:{{ task.progress }}%"></span></span><span class="progress-num">{{ task.progress }}%</span></td>
-              <td class="table-actions">
+              <td data-label="Category">{{ task.category }}</td>
+              <td data-label="Status">{% if task.status == 'completed' %}<span class="role-badge completed">Completed</span>{% elif task.status == 'in_progress' %}<span class="role-badge in_progress">In progress</span>{% else %}<span class="role-badge pending">Pending</span>{% endif %}</td>
+              <td data-label="Progress"><span class="progress-track"><span class="progress-fill" style="width:{{ task.progress }}%"></span></span><span class="progress-num">{{ task.progress }}%</span></td>
+              <td class="table-actions" data-label="Actions">
                 <a class="edit-btn" href="{{ url_for('edit_task', task_id=task.id) }}">Edit</a>
                 <form method="post" action="{{ url_for('delete_task', task_id=task.id) }}" onsubmit="return confirm('Delete this task? This cannot be undone.');"><button class="delete-btn" type="submit">Delete</button></form>
               </td>

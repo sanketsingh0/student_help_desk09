@@ -42,8 +42,8 @@
         <tbody>
         {% for task in tasks %}
           <tr>
-            <td class="task-cell"><b>{{ task.student_name }}</b><small>{{ task.student_email }}{% if task.student_roll %} · Roll: {{ task.student_roll }}{% endif %}</small></td>
-            <td class="task-cell">
+            <td class="task-cell" data-label="Student"><b>{{ task.student_name }}</b><small>{{ task.student_email }}{% if task.student_roll %} · Roll: {{ task.student_roll }}{% endif %}</small></td>
+            <td class="task-cell" data-label="Task">
               <b>{{ task.subject_code }} · {{ task.title }}</b>
               <small>{{ task.category }}{% if task.subject_name %} · {{ task.subject_name }}{% endif %}</small>
               <small>{{ task.description }}</small>
@@ -52,9 +52,9 @@
                 {% if task.work_link %}<a class="work-link" href="{{ task.work_link }}" target="_blank" rel="noopener">📎 View submitted work →</a>{% else %}<span class="muted-text">No link submitted</span>{% endif %}
               </div>
             </td>
-            <td>{% if task.status == 'completed' %}<span class="role-badge completed">Completed</span>{% elif task.status == 'in_progress' %}<span class="role-badge in_progress">In progress</span>{% else %}<span class="role-badge pending">Pending</span>{% endif %}</td>
-            <td><span class="progress-track"><span class="progress-fill" style="width:{{ task.progress }}%"></span></span><span class="progress-num">{{ task.progress }}%</span></td>
-            <td>
+            <td data-label="Status">{% if task.status == 'completed' %}<span class="role-badge completed">Completed</span>{% elif task.status == 'in_progress' %}<span class="role-badge in_progress">In progress</span>{% else %}<span class="role-badge pending">Pending</span>{% endif %}</td>
+            <td data-label="Progress"><span class="progress-track"><span class="progress-fill" style="width:{{ task.progress }}%"></span></span><span class="progress-num">{{ task.progress }}%</span></td>
+            <td data-label="Grade & mark">
               <form class="teacher-form" method="post" action="{{ url_for('teacher_update_task', task_id=task.id) }}">
                 <input type="hidden" name="subject_code" value="{{ subject_code }}">
                 <input type="hidden" name="student_id" value="{{ selected_student }}">

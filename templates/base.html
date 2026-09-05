@@ -1,1 +1,129 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{% block title %}StudySpace{% endblock %}</title><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@700;800&display=swap" rel="stylesheet"><link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}"></head><body><header class="site-header"><a class="brand" href="{{ url_for('home') }}"><span class="brand-mark">S</span> StudySpace</a><nav>{% if session.get('user_id') %}<a href="{{ url_for('home') }}#materials">Materials</a>{% if session.get('is_admin') or session.get('is_teacher') %}<a href="{{ url_for('teacher_panel') }}">Teacher panel</a><a href="{{ url_for('work_report') }}">Work report</a>{% endif %}{% if session.get('is_admin') %}<a href="{{ url_for('admin_dashboard') }}">Admin panel</a>{% endif %}{% if not session.get('is_admin') and not session.get('is_teacher') %}<a href="{{ url_for('student_tasks') }}">My tasks</a><a href="{{ url_for('student_tasks', edit_profile=1) }}">Profile</a>{% endif %}<a href="{{ url_for('logout') }}">Log out</a>{% else %}<a href="{{ url_for('login') }}">Student login</a><a href="{{ url_for('register') }}">Register</a>{% endif %}</nav></header>{% with messages=get_flashed_messages(with_categories=true) %}{% if messages %}<div class="flash-wrap">{% for category,message in messages %}<p class="flash {{ category }}">{{ message }}</p>{% endfor %}</div>{% endif %}{% endwith %}{% block content %}{% endblock %}<footer><a class="brand" href="{{ url_for('home') }}"><span class="brand-mark">S</span> StudySpace</a><p>Made for students, with care.</p></footer></body></html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}StudySpace{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="{{ url_for('home') }}">
+      <span class="brand-mark">S</span>
+      StudySpace
+    </a>
+    <nav class="desktop-nav">
+      {% if session.get('user_id') %}
+      <a href="{{ url_for('home') }}#materials">Materials</a>
+      {% if session.get('is_admin') or session.get('is_teacher') %}
+      <a href="{{ url_for('teacher_panel') }}">Teacher panel</a>
+      <a href="{{ url_for('work_report') }}">Work report</a>
+      {% endif %}
+      {% if session.get('is_admin') %}
+      <a href="{{ url_for('admin_dashboard') }}">Admin panel</a>
+      {% endif %}
+      {% if not session.get('is_admin') and not session.get('is_teacher') %}
+      <a href="{{ url_for('student_tasks') }}">My tasks</a>
+      <a href="{{ url_for('student_tasks', edit_profile=1) }}">Profile</a>
+      {% endif %}
+      <a href="{{ url_for('logout') }}">Log out</a>
+      {% else %}
+      <a href="{{ url_for('login') }}">Student login</a>
+      <a href="{{ url_for('register') }}">Register</a>
+      {% endif %}
+    </nav>
+    <button class="mobile-menu-btn" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="mobile-nav-overlay">
+      <span class="dot"></span>
+      <span class="dot"></span>
+      <span class="dot"></span>
+    </button>
+  </header>
+
+  <div class="mobile-nav-overlay" id="mobile-nav-overlay" aria-hidden="true">
+    <div class="mobile-nav-panel">
+      <div class="mobile-nav-header">
+        <span class="mobile-nav-title">Menu</span>
+        <button class="mobile-nav-close" type="button" aria-label="Close menu">✕</button>
+      </div>
+      <nav class="mobile-nav-links">
+        {% if session.get('user_id') %}
+        <a href="{{ url_for('home') }}#materials">Materials</a>
+        {% if not session.get('is_admin') and not session.get('is_teacher') %}
+        <a href="{{ url_for('student_tasks') }}">My tasks</a>
+        <a href="{{ url_for('student_tasks', edit_profile=1) }}">Profile</a>
+        {% endif %}
+        {% if session.get('is_admin') or session.get('is_teacher') %}
+        <a href="{{ url_for('teacher_panel') }}">Teacher panel</a>
+        <a href="{{ url_for('work_report') }}">Work report</a>
+        {% endif %}
+        {% if session.get('is_admin') %}
+        <a href="{{ url_for('admin_dashboard') }}">Admin panel</a>
+        {% endif %}
+        <a href="{{ url_for('logout') }}" class="mobile-nav-logout">Log out</a>
+        {% else %}
+        <a href="{{ url_for('login') }}">Student login</a>
+        <a href="{{ url_for('register') }}">Register</a>
+        {% endif %}
+      </nav>
+    </div>
+  </div>
+
+  {% with messages=get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+  <div class="flash-wrap">
+    {% for category,message in messages %}
+    <p class="flash {{ category }}">{{ message }}</p>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% endwith %}
+
+  {% block content %}{% endblock %}
+
+  <footer>
+    <a class="brand" href="{{ url_for('home') }}">
+      <span class="brand-mark">S</span>
+      StudySpace
+    </a>
+    <p>Made for students, with care.</p>
+  </footer>
+  <script>
+    (function () {
+      var btn = document.querySelector('.mobile-menu-btn');
+      var overlay = document.getElementById('mobile-nav-overlay');
+      var closeBtn = document.querySelector('.mobile-nav-close');
+      if (!btn || !overlay) return;
+      function openMenu() {
+        overlay.classList.add('open');
+        overlay.setAttribute('aria-hidden', 'false');
+        btn.setAttribute('aria-expanded', 'true');
+        document.body.style.overflow = 'hidden';
+      }
+      function closeMenu() {
+        overlay.classList.remove('open');
+        overlay.setAttribute('aria-hidden', 'true');
+        btn.setAttribute('aria-expanded', 'false');
+        document.body.style.overflow = '';
+      }
+      btn.addEventListener('click', function () {
+        if (overlay.classList.contains('open')) closeMenu(); else openMenu();
+      });
+      if (closeBtn) closeBtn.addEventListener('click', closeMenu);
+      overlay.addEventListener('click', function (e) {
+        if (e.target === overlay) closeMenu();
+      });
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && overlay.classList.contains('open')) closeMenu();
+      });
+      // Close menu when a nav link is tapped
+      var links = overlay.querySelectorAll('a');
+      for (var i = 0; i < links.length; i++) {
+        links[i].addEventListener('click', closeMenu);
+      }
+    })();
+  </script>
+</body>
+</html>
