@@ -100,13 +100,13 @@
         overlay.classList.add('open');
         overlay.setAttribute('aria-hidden', 'false');
         btn.setAttribute('aria-expanded', 'true');
-        document.body.style.overflow = 'hidden';
+        document.body.classList.add('mobile-menu-open');
       }
       function closeMenu() {
         overlay.classList.remove('open');
         overlay.setAttribute('aria-hidden', 'true');
         btn.setAttribute('aria-expanded', 'false');
-        document.body.style.overflow = '';
+        document.body.classList.remove('mobile-menu-open');
       }
       btn.addEventListener('click', function () {
         if (overlay.classList.contains('open')) closeMenu(); else openMenu();
